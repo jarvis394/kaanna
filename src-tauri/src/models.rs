@@ -203,6 +203,28 @@ pub async fn download(root: &Path, id: &str, mut progress: impl FnMut(u64, u64))
     Ok(())
 }
 
+/// Delete a model's files, including any partial download.
+pub async fn delete(root: &Path, id: &str) -> Result<()> {
+    let dir = spec(id)?.dir(root);
+    match tokio::fs::remove_dir_all(&dir).await {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e).context("deleting model files"),
+        _ => Ok(()),
+    }
+}
+
+/// Remove the `*.part` files left by an interrupted download.
+pub async fn discard_partial(root: &Path, id: &str) {
+    let Ok(spec) = spec(id) else { return };
+    let dir = spec.dir(root);
+    for file in spec.files {
+        tokio::fs::remove_file(part_path(&dir.join(file.name))).await.ok();
+    }
+}
+
+fn part_path(dest: &Path) -> PathBuf {
+    PathBuf::from(format!("{}.part", dest.display()))
+}
+
 async fn download_file(
     client: &reqwest::Client,
     url: &str,
@@ -210,7 +232,7 @@ async fn download_file(
     file: &ModelFile,
     mut progress: impl FnMut(u64),
 ) -> Result<()> {
-    let part = PathBuf::from(format!("{}.part", dest.display()));
+    let part = part_path(dest);
     let mut hasher = Sha256::new();
 
     // Resume: re-hash what we already have, then ask for the rest.

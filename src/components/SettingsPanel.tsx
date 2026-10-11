@@ -4,7 +4,7 @@ import { Switch } from "@base-ui/react/switch";
 import type { ReactNode } from "react";
 import { formatBytes, type Model, type Settings } from "../lib/api";
 import { CheckIcon, ChevronIcon } from "./Icons";
-import { ModelRow, type Downloads } from "./Models";
+import { ModelRow, StoredModelRow, type Downloads } from "./Models";
 import { ShortcutRecorder } from "./ShortcutRecorder";
 
 export interface ViewPrefs {
@@ -22,6 +22,8 @@ interface Props {
   onAsrModel: (id: string) => void;
   downloads: Downloads;
   onDownload: (id: string) => void;
+  onCancelDownload: (id: string) => void;
+  onDeleteModel: (id: string) => void;
   onClear: () => void;
   toggleShortcut: string;
   onToggleShortcut: (accelerator: string) => void;
@@ -74,6 +76,8 @@ export function SettingsPanel(p: Props) {
   const asrModels = p.models.filter((m) => m.kind === "asr");
   const items = asrModels.map((m) => ({ value: m.id, label: m.name }));
   const selected = asrModels.find((m) => m.id === p.asrModel);
+  const stored = p.models.filter((m) => m.installed);
+  const used = stored.reduce((n, m) => n + m.size, 0);
 
   return (
     <div className="settings">
@@ -166,7 +170,25 @@ export function SettingsPanel(p: Props) {
         </Select.Root>
         {selected && (
           <div className="model-list">
-            <ModelRow model={selected} progress={p.downloads[selected.id]} onDownload={() => p.onDownload(selected.id)} />
+            <ModelRow
+              model={selected}
+              progress={p.downloads[selected.id]}
+              onDownload={() => p.onDownload(selected.id)}
+              onCancel={() => p.onCancelDownload(selected.id)}
+            />
+          </div>
+        )}
+      </section>
+
+      <section>
+        <h2>
+          Storage<span className="h2-note">{stored.length ? `${formatBytes(used)} on this Mac` : "No models downloaded"}</span>
+        </h2>
+        {stored.length > 0 && (
+          <div className="model-list">
+            {stored.map((m) => (
+              <StoredModelRow key={m.id} model={m} onDelete={() => p.onDeleteModel(m.id)} />
+            ))}
           </div>
         )}
       </section>

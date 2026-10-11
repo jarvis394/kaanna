@@ -28,10 +28,10 @@ crossbeam-channel = "0.5"
 log = "0.4"
 env_logger = "0.11"
 cpal = "0.18"
-whisper-rs = { version = "0.16", features = ["metal", "log_backend"] }
-candle-core = { version = "=0.10.2", features = ["accelerate"] }
-candle-nn = { version = "=0.10.2", features = ["accelerate"] }
-candle-transformers = { version = "=0.10.2", features = ["accelerate"] }
+whisper-rs = { version = "0.16", features = ["log_backend"] }
+candle-core = "=0.10.2"
+candle-nn = "=0.10.2"
+candle-transformers = "=0.10.2"
 unicode-normalization = "0.1"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream"] }
 futures-util = "0.3"
@@ -42,8 +42,16 @@ libc = "0.2"
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }
 
+# Apple-only acceleration; features unify with the plain dependencies above. Elsewhere whisper.cpp
+# and candle run on the CPU.
 [target.'cfg(target_os = "macos")'.dependencies]
+whisper-rs = { version = "0.16", features = ["metal"] }
+candle-core = { version = "=0.10.2", features = ["accelerate"] }
+candle-nn = { version = "=0.10.2", features = ["accelerate"] }
+candle-transformers = { version = "=0.10.2", features = ["accelerate"] }
 screencapturekit = "11"
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSAnimation", "NSAnimationContext", "NSButton", "NSControl", "NSResponder", "NSView", "NSWindow"] }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-global-shortcut = "2"

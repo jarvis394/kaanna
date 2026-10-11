@@ -26,6 +26,26 @@ export function installDemoBackend() {
   ];
   let settings: Settings = { pauseMs: 600, maxUtteranceSecs: 12, livePreview: true, vadThreshold: 0.5 };
   let timers: number[] = [];
+  const downloads = new Map<string, () => void>();
+
+  // Fake download: ~6 s of progress events, resolving true when done or false when cancelled.
+  const download = (id: string) =>
+    new Promise<boolean>((resolve) => {
+      const model = models.find((m) => m.id === id)!;
+      let received = 0;
+      const timer = window.setInterval(() => {
+        received = Math.min(model.size, received + model.size / 30);
+        emit("download-progress", { id, received, total: model.size });
+        if (received >= model.size) finish(true);
+      }, 200);
+      const finish = (done: boolean) => {
+        clearInterval(timer);
+        downloads.delete(id);
+        model.installed ||= done;
+        resolve(done);
+      };
+      downloads.set(id, () => finish(false));
+    });
 
   const play = () => {
     let t = 300;
@@ -53,7 +73,7 @@ export function installDemoBackend() {
         case "list_sources":
           return sources;
         case "list_models":
-          return models;
+          return models.map((m) => ({ ...m }));
         case "default_asr_model":
           return "asr-fi-large-v3-q5";
         case "get_settings":
@@ -68,6 +88,16 @@ export function installDemoBackend() {
           timers = [];
           emit("status", { state: "listening" });
           play();
+          return;
+        case "download_model":
+          return download((args as { id: string }).id);
+        case "delete_model": {
+          const model = models.find((m) => m.id === (args as { id: string }).id);
+          if (model) model.installed = false;
+          return;
+        }
+        case "cancel_download":
+          downloads.get((args as { id: string }).id)?.();
           return;
         case "stop":
           timers.forEach(clearTimeout);

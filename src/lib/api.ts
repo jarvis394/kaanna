@@ -57,7 +57,14 @@ export const api = {
   listSources: () => invoke<Source[]>("list_sources"),
   listModels: () => invoke<Model[]>("list_models"),
   defaultAsrModel: () => invoke<string>("default_asr_model"),
-  downloadModel: (id: string) => invoke<void>("download_model", { id }),
+  /** Resolves to true once installed, false if cancelled. */
+  downloadModel: (id: string) => invoke<boolean>("download_model", { id }),
+  cancelDownload: (id: string) => invoke<void>("cancel_download", { id }),
+  deleteModel: (id: string) => invoke<void>("delete_model", { id }),
+  /** Show the window (it starts hidden); call once the first real frame has painted. */
+  revealWindow: () => invoke<void>("reveal_window"),
+  /** macOS: fade the native close button along with the toolbar. */
+  setWindowControlsVisible: (visible: boolean) => invoke<void>("set_window_controls_visible", { visible }),
   start: (sourceId: string, asrModel: string) => invoke<void>("start", { sourceId, asrModel }),
   stop: () => invoke<void>("stop"),
   getSettings: () => invoke<Settings>("get_settings"),
@@ -78,6 +85,9 @@ type Events = {
 export function on<K extends keyof Events>(event: K, cb: (payload: Events[K]) => void): Promise<UnlistenFn> {
   return listen<Events[K]>(event, (e) => cb(e.payload));
 }
+
+/** macOS draws the native close button; elsewhere the window is frameless with our own close button. */
+export const isMac = navigator.userAgent.includes("Mac");
 
 export function formatBytes(n: number): string {
   if (n >= 1e9) return `${(n / 1e9).toFixed(2)} GB`;

@@ -8,9 +8,10 @@ mod spm;
 use parking_lot::{Mutex, RwLock};
 use pipeline::{Engine, Session, Settings};
 use serde::Serialize;
-use std::collections::HashSet;
+use futures_util::future::{AbortHandle, Abortable};
+use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::image::Image;
@@ -27,7 +28,10 @@ struct AppState {
     /// pressed Stop can tell it's been superseded.
     attempt: AtomicU64,
     settings: Arc<RwLock<Settings>>,
-    downloads: Mutex<HashSet<String>>,
+    /// In-flight downloads, so `cancel_download` can abort them.
+    downloads: Mutex<HashMap<String, AbortHandle>>,
+    /// The window starts hidden and is revealed once, when the UI has painted.
+    revealed: AtomicBool,
 }
 
 type CmdResult<T> = Result<T, String>;
@@ -67,18 +71,52 @@ fn default_asr_model() -> &'static str {
     models::DEFAULT_ASR
 }
 
+/// Resolves to `true` once the model is installed, or `false` if the download was cancelled.
 #[tauri::command]
-async fn download_model(app: AppHandle, state: State<'_, AppState>, id: String) -> CmdResult<()> {
-    if !state.downloads.lock().insert(id.clone()) {
-        return Ok(()); // already in progress
+async fn download_model(app: AppHandle, state: State<'_, AppState>, id: String) -> CmdResult<bool> {
+    let (handle, registration) = AbortHandle::new_pair();
+    {
+        let mut downloads = state.downloads.lock();
+        if downloads.contains_key(&id) {
+            return Ok(false); // already in progress; that call reports the outcome
+        }
+        downloads.insert(id.clone(), handle);
     }
     let root = state.models_dir.clone();
-    let result = models::download(&root, &id, |received, total| {
+    let download = models::download(&root, &id, |received, total| {
         let _ = app.emit("download-progress", DownloadProgress { id: id.clone(), received, total });
-    })
-    .await;
+    });
+    let result = Abortable::new(download, registration).await;
     state.downloads.lock().remove(&id);
-    result.map_err(err)
+    match result {
+        Ok(done) => done.map(|()| true).map_err(err),
+        Err(_aborted) => {
+            // Cancel means "I don't want this": free the disk space rather than keep a resumable part.
+            models::discard_partial(&root, &id).await;
+            Ok(false)
+        }
+    }
+}
+
+#[tauri::command]
+fn cancel_download(state: State<'_, AppState>, id: String) {
+    if let Some(handle) = state.downloads.lock().get(&id) {
+        handle.abort();
+    }
+}
+
+#[tauri::command]
+async fn delete_model(app: AppHandle, state: State<'_, AppState>, id: String) -> CmdResult<()> {
+    if state.downloads.lock().contains_key(&id) {
+        return Err("Cancel the download first".into());
+    }
+    // The VAD model is opened per session; the others stay cached in the engine.
+    let in_use = id == models::VAD || state.engine.holds(&id);
+    if in_use && state.session.lock().is_some() {
+        stop_listening(&app);
+    }
+    state.engine.evict(&id);
+    models::delete(&state.models_dir, &id).await.map_err(err)
 }
 
 #[tauri::command]
@@ -165,6 +203,92 @@ fn set_toggle_shortcut(app: AppHandle, shortcut: Option<String>) -> Result<(), S
             .map_err(|_| "That shortcut is already used by another app".to_string())?;
     }
     Ok(())
+}
+
+#[tauri::command]
+fn reveal_window(app: AppHandle) {
+    reveal(&app);
+}
+
+/// First appearance. The window is created hidden so the bare vibrancy never shows before the
+/// UI has painted its tint over it; then the whole window fades in, blur and content together.
+fn reveal(app: &AppHandle) {
+    if app.state::<AppState>().revealed.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    #[cfg(target_os = "macos")]
+    set_alpha(app, 0.0, None);
+    show_main(app);
+    #[cfg(target_os = "macos")]
+    set_alpha(app, 1.0, Some(0.2));
+}
+
+/// Set the main window's opacity, animated over `duration` seconds if given. Runs on the main
+/// thread, queued behind any window calls made before it.
+#[cfg(target_os = "macos")]
+fn set_alpha(app: &AppHandle, alpha: f64, duration: Option<f64>) {
+    use objc2_app_kit::{NSAnimatablePropertyContainer, NSAnimationContext, NSWindow};
+    let Some(window) = app.get_webview_window("main") else { return };
+    let w = window.clone();
+    let _ = window.run_on_main_thread(move || {
+        let Ok(ptr) = w.ns_window() else { return };
+        // SAFETY: Tauri returns the live NSWindow backing this webview window, and we're on
+        // the main thread, where AppKit objects may be used.
+        let ns_window = unsafe { &*ptr.cast::<NSWindow>() };
+        match duration {
+            Some(secs) => {
+                NSAnimationContext::beginGrouping();
+                NSAnimationContext::currentContext().setDuration(secs);
+                ns_window.animator().setAlphaValue(alpha);
+                NSAnimationContext::endGrouping();
+            }
+            None => ns_window.setAlphaValue(alpha),
+        }
+    });
+}
+
+/// A floating overlay has nothing to minimise or zoom: keep only the red close button.
+#[cfg(target_os = "macos")]
+fn close_button_only(app: &AppHandle) {
+    use objc2_app_kit::{NSWindow, NSWindowButton};
+    let Some(window) = app.get_webview_window("main") else { return };
+    let w = window.clone();
+    let _ = window.run_on_main_thread(move || {
+        let Ok(ptr) = w.ns_window() else { return };
+        // SAFETY: as in `set_alpha`.
+        let ns_window = unsafe { &*ptr.cast::<NSWindow>() };
+        for kind in [NSWindowButton::MiniaturizeButton, NSWindowButton::ZoomButton] {
+            if let Some(button) = ns_window.standardWindowButton(kind) {
+                button.setHidden(true);
+            }
+        }
+    });
+}
+
+/// Fade the native close button with the toolbar while the window is in subtitle mode.
+#[tauri::command]
+fn set_window_controls_visible(app: AppHandle, visible: bool) {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2_app_kit::{NSAnimatablePropertyContainer, NSAnimationContext, NSWindow, NSWindowButton};
+        let Some(window) = app.get_webview_window("main") else { return };
+        let w = window.clone();
+        let _ = window.run_on_main_thread(move || {
+            let Ok(ptr) = w.ns_window() else { return };
+            // SAFETY: as in `set_alpha`.
+            let ns_window = unsafe { &*ptr.cast::<NSWindow>() };
+            let Some(buttons) = ns_window.standardWindowButton(NSWindowButton::CloseButton).and_then(|b| unsafe { b.superview() }) else {
+                return;
+            };
+            NSAnimationContext::beginGrouping();
+            // Same timing as the toolbar: back quickly, away slowly.
+            NSAnimationContext::currentContext().setDuration(if visible { 0.15 } else { 0.6 });
+            buttons.animator().setAlphaValue(if visible { 1.0 } else { 0.0 });
+            NSAnimationContext::endGrouping();
+        });
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = (app, visible);
 }
 
 fn show_main(app: &AppHandle) {
@@ -260,9 +384,18 @@ pub fn run() {
                 session: Mutex::new(None),
                 attempt: AtomicU64::new(0),
                 settings: Arc::new(RwLock::new(Settings::default())),
-                downloads: Mutex::new(HashSet::new()),
+                downloads: Mutex::new(HashMap::new()),
+                revealed: AtomicBool::new(false),
+            });
+            // Safety net in case the UI never reports in (e.g. a script error): show it anyway.
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_secs(3));
+                reveal(&handle);
             });
             build_tray(app)?;
+            #[cfg(target_os = "macos")]
+            close_button_only(app.handle());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -278,6 +411,10 @@ pub fn run() {
             list_models,
             default_asr_model,
             download_model,
+            cancel_download,
+            delete_model,
+            reveal_window,
+            set_window_controls_visible,
             start,
             stop,
             get_settings,

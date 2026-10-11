@@ -11,7 +11,7 @@ import { SourceSelect } from "./components/SourceSelect";
 import { Spinner } from "./components/Spinner";
 import { Transcript } from "./components/Transcript";
 import { usePresence } from "./lib/presence";
-import { api, on, prefs, type Model, type Settings, type Source, type Status, type Utterance } from "./lib/api";
+import { api, isMac, on, prefs, type Model, type Settings, type Source, type Status, type Utterance } from "./lib/api";
 import "./App.css";
 
 const MAX_LINES = 60;
@@ -99,6 +99,14 @@ export default function App() {
     };
   }, [refreshSources, refreshModels]);
 
+  // The window starts hidden. Reveal it once the model list is in, so the first frame is already
+  // the right screen (setup or transcript), and after a paint so it's never blank.
+  const hasModels = models.length > 0;
+  useEffect(() => {
+    if (!hasModels) return;
+    requestAnimationFrame(() => requestAnimationFrame(() => api.revealWindow()));
+  }, [hasModels]);
+
   const required = useMemo(
     () => [asrModel, MT_MODEL, VAD_MODEL].map((id) => models.find((m) => m.id === id)).filter((m): m is Model => !!m),
     [models, asrModel],
@@ -123,22 +131,50 @@ export default function App() {
   const download = useCallback(
     async (id: string) => {
       setError(null);
+      // Show progress (and the Cancel button) right away, before the first byte arrives.
+      const size = models.find((m) => m.id === id)?.size ?? 0;
+      setDownloads((d) => ({ ...d, [id]: d[id] ?? { id, received: 0, total: size } }));
       try {
-        await api.downloadModel(id);
+        return await api.downloadModel(id);
       } catch (e) {
         setError(`Download failed: ${e}`);
+        return false;
       } finally {
         setDownloads((d) => ({ ...d, [id]: undefined }));
         await refreshModels();
       }
     },
-    [refreshModels],
+    [models, refreshModels],
   );
 
+  const downloadAllCancelled = useRef(false);
   const downloadAll = async () => {
+    downloadAllCancelled.current = false;
     // Small ones first so progress feels alive; one at a time keeps bandwidth focused.
     const missing = [...required].filter((m) => !m.installed).sort((a, b) => a.size - b.size);
-    for (const m of missing) await download(m.id);
+    for (const m of missing) {
+      if (downloadAllCancelled.current || !(await download(m.id))) break;
+    }
+  };
+
+  const cancelDownload = (id: string) => {
+    api.cancelDownload(id).catch((e) => setError(String(e)));
+  };
+
+  const deleteModel = async (id: string) => {
+    setError(null);
+    try {
+      await api.deleteModel(id);
+    } catch (e) {
+      setError(`Couldn't delete the model: ${e}`);
+    } finally {
+      await refreshModels();
+    }
+  };
+
+  const cancelAll = () => {
+    downloadAllCancelled.current = true;
+    Object.keys(downloads).filter((id) => downloads[id]).forEach(cancelDownload);
   };
 
   const changeSource = (id: string) => {
@@ -224,6 +260,9 @@ export default function App() {
 
   // While translating, fade the chrome away so the window reads like subtitles.
   const quiet = listening && !hovered && panel === "transcript" && lines.length > 0;
+  useEffect(() => {
+    if (isMac) api.setWindowControlsVisible(!quiet);
+  }, [quiet]);
   const screen = panel === "settings" && settings && asrModel ? "settings" : !ready && models.length > 0 ? "setup" : "transcript";
   const startLabel = busy ? "Stop" : "Start";
   // The label box animates to the active word's width, so the button resizes smoothly instead of jumping.
@@ -247,6 +286,7 @@ export default function App() {
     <Tooltip.Provider delay={500}>
       <div
         className="app"
+        data-platform={isMac ? "mac" : "other"}
         data-quiet={quiet}
         data-view={screen}
         onMouseEnter={() => setHovered(true)}
@@ -254,10 +294,6 @@ export default function App() {
       >
         <header className="toolbar" data-tauri-drag-region>
           <div className="toolbar-left" data-tauri-drag-region>
-            {/* Top-left, like every macOS window. Hides the panel; ⌘Q quits. */}
-            <button className="close-btn" onClick={() => getCurrentWindow().close()} aria-label="Close window">
-              <CloseIcon width={12} height={12} strokeWidth={2.6} />
-            </button>
             <SourceSelect sources={sources} value={sourceId} onChange={changeSource} onOpen={refreshSources} state={status.state} />
             <LevelMeter active={listening} />
           </div>
@@ -316,6 +352,15 @@ export default function App() {
                 <SlidersIcon />
               </Toggle>
             </Tip>
+            {/* macOS has the native close button; elsewhere close sits top-right, as on Windows.
+                Closing hides the window; the tray icon brings it back. */}
+            {!isMac && (
+              <Tip label="Close">
+                <button className="icon-btn" onClick={() => getCurrentWindow().close()} aria-label="Close window">
+                  <CloseIcon />
+                </button>
+              </Tip>
+            )}
           </div>
         </header>
 
@@ -331,12 +376,14 @@ export default function App() {
               onAsrModel={changeAsrModel}
               downloads={downloads}
               onDownload={download}
+              onCancelDownload={cancelDownload}
+              onDeleteModel={deleteModel}
               onClear={clear}
               toggleShortcut={toggleShortcut}
               onToggleShortcut={changeToggleShortcut}
             />
           ) : screen === "setup" ? (
-            <Setup required={required} downloads={downloads} error={error} onDownloadAll={downloadAll} />
+            <Setup required={required} downloads={downloads} error={error} onDownloadAll={downloadAll} onCancel={cancelAll} />
           ) : (
             <Transcript lines={lines} showOriginal={view.showOriginal} fontSize={view.fontSize} listening={listening} />
           )}

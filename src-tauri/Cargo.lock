@@ -2778,6 +2778,8 @@ dependencies = [
  "futures-util",
  "libc",
  "log",
+ "objc2",
+ "objc2-app-kit",
  "parking_lot",
  "reqwest",
  "screencapturekit",

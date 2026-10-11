@@ -130,6 +130,30 @@ impl Engine {
         Ok(Some((asr, mt)))
     }
 
+    /// Whether `id` is currently loaded (and so possibly in use by a session).
+    pub fn holds(&self, id: &str) -> bool {
+        match models::spec(id).map(|s| s.kind) {
+            Ok(models::ModelKind::Asr) => self.asr.lock().as_ref().is_some_and(|(loaded, _)| loaded == id),
+            Ok(models::ModelKind::Mt) => self.mt.lock().is_some(),
+            _ => false,
+        }
+    }
+
+    /// Drop the cached copy of `id`, if loaded. Running workers keep their own reference until
+    /// they stop.
+    pub fn evict(&self, id: &str) {
+        match models::spec(id).map(|s| s.kind) {
+            Ok(models::ModelKind::Asr) => {
+                let mut slot = self.asr.lock();
+                if slot.as_ref().is_some_and(|(loaded, _)| loaded == id) {
+                    *slot = None;
+                }
+            }
+            Ok(models::ModelKind::Mt) => *self.mt.lock() = None,
+            _ => {}
+        }
+    }
+
     /// Stop all inference and free the models. Must run before the process exits: ggml's Metal
     /// device is a C++ static whose destructor asserts that every GPU buffer was released.
     ///

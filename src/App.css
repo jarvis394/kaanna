@@ -22,6 +22,9 @@
   --accent-soft: rgba(255, 255, 255, 0.12);
   --focus-ring: 0 0 0 3px rgba(255, 255, 255, 0.28);
   --danger: #ff6961;
+  /* macOS system green (dark). */
+  --green: #30d158;
+  --green-soft: rgba(48, 209, 88, 0.16);
   --radius: 18px;
   --ease: cubic-bezier(0.23, 1, 0.32, 1);
   --toolbar-height: 48px;
@@ -100,6 +103,12 @@ button {
     border-color 150ms ease-out;
 }
 
+/* Clear the native close button (inset 16px, 14px wide). The minimise and zoom buttons are
+   hidden, see `close_button_only`. */
+.app[data-platform="mac"] .toolbar {
+  padding-left: 42px;
+}
+
 .app[data-quiet="true"] .toolbar {
   opacity: 0;
   border-color: transparent;
@@ -122,38 +131,6 @@ button {
   align-items: center;
   gap: 6px;
   min-width: 0;
-}
-
-.close-btn {
-  flex: none;
-  width: 14px;
-  height: 14px;
-  margin-right: 6px;
-  display: inline-grid;
-  place-items: center;
-  border-radius: 50%;
-  /* macOS close-button red. */
-  background: #ff5f57;
-  box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.2);
-  color: transparent;
-  transition:
-    background 150ms ease,
-    color 150ms ease;
-}
-
-/* Like traffic lights: the glyph shows once the pointer is over the toolbar. */
-.toolbar:hover .close-btn,
-.close-btn:focus-visible {
-  color: #7a1816;
-}
-
-.close-btn:active {
-  background: #bf4942;
-}
-
-.close-btn:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
 }
 
 .tip-wrap {
@@ -418,7 +395,7 @@ button {
 
 /* macOS system green: the mic is open and translating. */
 .source-trigger-icon[data-state="listening"] {
-  color: #30d158;
+  color: var(--green);
 }
 
 /* Apple-style activity indicator: 12 fixed bars fading in sequence (see Spinner.tsx). */
@@ -823,7 +800,7 @@ button {
   max-width: 520px;
 }
 
-.setup .btn-primary {
+.setup > .btn {
   /* Primary action sits bottom-right, as in macOS dialogs. */
   align-self: flex-end;
   height: 28px;
@@ -856,6 +833,12 @@ button {
   right: 12px;
   height: 0.5px;
   background: var(--line);
+}
+
+.model-row-action {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .model-row-text {
@@ -920,6 +903,15 @@ button {
   }
 }
 
+.btn[data-danger] {
+  color: var(--danger);
+}
+
+.badge-ready {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
 .badge-muted {
   background: var(--surface);
   color: var(--fg-2);
@@ -980,6 +972,12 @@ button {
   color: var(--fg-2);
   font-size: 12px;
   font-weight: 600;
+}
+
+.h2-note {
+  margin-left: 6px;
+  color: var(--fg-3);
+  font-weight: 400;
 }
 
 .group {

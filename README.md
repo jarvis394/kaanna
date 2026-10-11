@@ -77,6 +77,23 @@ the live VAD pipeline.
   app. Restart the app after granting it.
 * **Input devices** need microphone permission.
 
+### Release builds
+
+`.github/workflows/build.yml` builds installers for macOS (Apple Silicon and Intel), Windows
+(x64: `.msi` and `.exe`) and Linux (x64: `.deb`, `.rpm`, `.AppImage`).
+
+* **Push a tag** such as `v0.2.0` to build everything and attach it to a *draft* GitHub release.
+  Bump `version` in `src-tauri/tauri.conf.json` first, since that's what the file names use.
+* **Run it manually** from Actions → Build → *Run workflow* to get the installers as workflow
+  artifacts without a release.
+
+Metal and Accelerate are macOS-only. On Windows and Linux, Whisper and translation run on the
+CPU, which is noticeably slower, and only input devices can be captured, not system audio.
+
+The builds aren't code-signed. On macOS, open the app once with right-click → *Open* (or
+*System Settings → Privacy & Security → Open Anyway*). On Windows, click past SmartScreen
+with *More info → Run anyway*.
+
 ### Notes
 
 * `candle` is pinned to `0.10.2`: `0.11` uses the `stdarch_neon_f16` intrinsics, which this
