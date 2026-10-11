@@ -85,28 +85,44 @@ pub type Models = (Arc<Mutex<Transcriber>>, Arc<Mutex<Translator>>);
 /// Loaded models, kept across sessions so switching audio source is instant.
 #[derive(Default)]
 pub struct Engine {
-    asr: Mutex<Option<(String, Arc<Mutex<Transcriber>>)>>,
+    /// Model id, the GPU it was loaded onto (`None` = CPU), and the model.
+    asr: Mutex<Option<(String, Option<i32>, Arc<Mutex<Transcriber>>)>>,
     mt: Mutex<Option<Arc<Mutex<Translator>>>>,
 }
 
 impl Engine {
-    /// Load (or reuse) the requested ASR model and the translator. Blocking; can take seconds.
+    /// Load (or reuse) the requested ASR model on the processor `device` prefers (see
+    /// [`asr::resolve_device`]), and the translator. Blocking; can take seconds.
     /// Loads can't be interrupted midway, but once `still_wanted` turns false the remaining
     /// models are skipped and `None` is returned. Whatever already loaded stays cached.
-    pub fn prepare(&self, root: &Path, asr_id: &str, still_wanted: &dyn Fn() -> bool) -> Result<Option<Models>> {
+    pub fn prepare(&self, root: &Path, asr_id: &str, device: &str, still_wanted: &dyn Fn() -> bool) -> Result<Option<Models>> {
+        let gpu = asr::resolve_device(device);
         let asr = {
             let mut slot = self.asr.lock();
             match slot.as_ref() {
-                Some((id, t)) if id == asr_id => t.clone(),
+                Some((id, on, t)) if id == asr_id && *on == gpu => t.clone(),
                 _ => {
                     // Free the old model before loading a new multi-GB one.
                     *slot = None;
                     let path = models::weights_path(root, asr_id)?;
-                    let mut t = Transcriber::load(&path)?;
-                    // First inference compiles Metal kernels; get that out of the way now.
-                    t.transcribe(&vec![0.0; SAMPLE_RATE], true)?;
+                    let load = |gpu| -> Result<Transcriber> {
+                        let mut t = Transcriber::load(&path, gpu)?;
+                        // First inference compiles GPU kernels; get that out of the way now.
+                        t.transcribe(&vec![0.0; SAMPLE_RATE], true)?;
+                        Ok(t)
+                    };
+                    // A GPU that's listed can still fail (out of video memory, driver trouble);
+                    // run on the CPU rather than not at all. Cached under the requested GPU, so
+                    // later starts don't retry the failing load.
+                    let t = match load(gpu) {
+                        Err(e) if gpu.is_some() => {
+                            log::warn!("loading {asr_id} on GPU {gpu:?} failed, using the CPU: {e:#}");
+                            load(None)?
+                        }
+                        loaded => loaded?,
+                    };
                     let t = Arc::new(Mutex::new(t));
-                    *slot = Some((asr_id.to_string(), t.clone()));
+                    *slot = Some((asr_id.to_string(), gpu, t.clone()));
                     t
                 }
             }
@@ -133,7 +149,7 @@ impl Engine {
     /// Whether `id` is currently loaded (and so possibly in use by a session).
     pub fn holds(&self, id: &str) -> bool {
         match models::spec(id).map(|s| s.kind) {
-            Ok(models::ModelKind::Asr) => self.asr.lock().as_ref().is_some_and(|(loaded, _)| loaded == id),
+            Ok(models::ModelKind::Asr) => self.asr.lock().as_ref().is_some_and(|(loaded, ..)| loaded == id),
             Ok(models::ModelKind::Mt) => self.mt.lock().is_some(),
             _ => false,
         }
@@ -145,7 +161,7 @@ impl Engine {
         match models::spec(id).map(|s| s.kind) {
             Ok(models::ModelKind::Asr) => {
                 let mut slot = self.asr.lock();
-                if slot.as_ref().is_some_and(|(loaded, _)| loaded == id) {
+                if slot.as_ref().is_some_and(|(loaded, ..)| loaded == id) {
                     *slot = None;
                 }
             }
@@ -166,7 +182,7 @@ impl Engine {
         let asr = self.asr.try_lock_for(timeout).and_then(|mut slot| slot.take());
         let mt = self.mt.try_lock_for(deadline.saturating_duration_since(Instant::now())).and_then(|mut slot| slot.take());
         let mut released = true;
-        if let Some((_, t)) = asr {
+        if let Some((.., t)) = asr {
             released &= wait_until_unique(t, deadline);
         }
         if let Some(t) = mt {

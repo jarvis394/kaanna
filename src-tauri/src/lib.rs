@@ -67,6 +67,12 @@ fn list_models(state: State<'_, AppState>) -> Vec<models::ModelStatus> {
 }
 
 #[tauri::command]
+async fn list_gpus() -> Vec<asr::GpuInfo> {
+    // Enumerating initialises the GPU drivers on first call, which can take a moment.
+    tauri::async_runtime::spawn_blocking(asr::list_gpus).await.unwrap_or_default()
+}
+
+#[tauri::command]
 fn default_asr_model() -> &'static str {
     models::DEFAULT_ASR
 }
@@ -120,7 +126,13 @@ async fn delete_model(app: AppHandle, state: State<'_, AppState>, id: String) ->
 }
 
 #[tauri::command]
-async fn start(app: AppHandle, state: State<'_, AppState>, source_id: String, asr_model: String) -> CmdResult<()> {
+async fn start(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    source_id: String,
+    asr_model: String,
+    device: String,
+) -> CmdResult<()> {
     // Tear down the previous session first so two captures never run at once.
     state.session.lock().take();
     let attempt = state.attempt.fetch_add(1, Ordering::SeqCst) + 1;
@@ -131,7 +143,7 @@ async fn start(app: AppHandle, state: State<'_, AppState>, source_id: String, as
 
     let _ = app.emit("status", Status::Loading("Loading models…".into()));
     let (engine, root, still_wanted) = (state.engine.clone(), state.models_dir.clone(), is_current.clone());
-    let loaded = tauri::async_runtime::spawn_blocking(move || engine.prepare(&root, &asr_model, &still_wanted))
+    let loaded = tauri::async_runtime::spawn_blocking(move || engine.prepare(&root, &asr_model, &device, &still_wanted))
         .await
         .map_err(|e| e.to_string())?;
 
@@ -265,6 +277,26 @@ fn close_button_only(app: &AppHandle) {
     });
 }
 
+/// A frameless window with `shadow` gets Windows 11's rounded corners and shadow, but also a
+/// light 1px border that doubles up with the UI's own hairline. Keep the corners, drop the border.
+/// Older Windows has no such attribute; the call just fails there.
+#[cfg(windows)]
+fn borderless_frame(app: &AppHandle) {
+    use windows_sys::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE};
+    let Some(window) = app.get_webview_window("main") else { return };
+    let Ok(hwnd) = window.hwnd() else { return };
+    let color = DWMWA_COLOR_NONE;
+    // SAFETY: `hwnd` is the live window handle, and the attribute takes a u32 COLORREF.
+    unsafe {
+        DwmSetWindowAttribute(
+            hwnd.0 as _,
+            DWMWA_BORDER_COLOR as u32,
+            (&color as *const u32).cast(),
+            size_of::<u32>() as u32,
+        );
+    }
+}
+
 /// Fade the native close button with the toolbar while the window is in subtitle mode.
 #[tauri::command]
 fn set_window_controls_visible(app: AppHandle, visible: bool) {
@@ -299,14 +331,20 @@ fn show_main(app: &AppHandle) {
     }
 }
 
-/// Hide the overlay. Nobody can see the subtitles then, so stop listening too.
 fn hide_main(app: &AppHandle) {
-    stop_listening(app);
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.hide();
     }
 }
 
+/// Closing means "I'm done": hide the overlay and stop listening.
+fn close_main(app: &AppHandle) {
+    stop_listening(app);
+    hide_main(app);
+}
+
+/// The global shortcut only shows and hides the overlay; translation keeps running while it's
+/// hidden, so bringing it back doesn't drop the session or the models.
 fn toggle_main(app: &AppHandle) {
     let visible = app
         .get_webview_window("main")
@@ -396,6 +434,8 @@ pub fn run() {
             build_tray(app)?;
             #[cfg(target_os = "macos")]
             close_button_only(app.handle());
+            #[cfg(windows)]
+            borderless_frame(app.handle());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -403,12 +443,13 @@ pub fn run() {
             // item quits, and the Dock or menu bar icon brings it back.
             if let WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
-                hide_main(window.app_handle());
+                close_main(window.app_handle());
             }
         })
         .invoke_handler(tauri::generate_handler![
             list_sources,
             list_models,
+            list_gpus,
             default_asr_model,
             download_model,
             cancel_download,
@@ -483,7 +524,7 @@ mod e2e {
 
         let pcm = read_wav("tests/fixtures/fi_sample.wav");
         let id = std::env::var("ASR").unwrap_or_else(|_| models::DEFAULT_ASR.into());
-        let mut asr = asr::Transcriber::load(&models::weights_path(&root, &id).unwrap()).unwrap();
+        let mut asr = asr::Transcriber::load(&models::weights_path(&root, &id).unwrap(), asr::resolve_device("auto")).unwrap();
         asr.transcribe(&vec![0.0; 16000], true).unwrap(); // warm-up
         for draft in [false, true] {
             let t0 = Instant::now();
@@ -514,7 +555,7 @@ mod e2e {
         });
 
         let engine = Engine::default();
-        let (asr, mt) = engine.prepare(&root, models::DEFAULT_ASR, &|| true).unwrap().unwrap();
+        let (asr, mt) = engine.prepare(&root, models::DEFAULT_ASR, "auto", &|| true).unwrap().unwrap();
         let settings = Arc::new(RwLock::new(Settings::default()));
         let (audio, _stop) =
             pipeline::spawn_workers(app.handle().clone(), &root, asr, mt, settings).unwrap();
@@ -555,7 +596,7 @@ mod e2e {
     #[ignore]
     fn shutdown_releases_models_mid_inference() {
         let engine = Engine::default();
-        let (asr, mt) = engine.prepare(&models_dir(), models::DEFAULT_ASR, &|| true).unwrap().unwrap();
+        let (asr, mt) = engine.prepare(&models_dir(), models::DEFAULT_ASR, "auto", &|| true).unwrap().unwrap();
         drop(mt);
         let worker = std::thread::spawn(move || {
             let noise: Vec<f32> = (0..16_000 * 28).map(|i| ((i * 7919) % 200) as f32 / 1000.0 - 0.1).collect();

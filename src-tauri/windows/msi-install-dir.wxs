@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Linked into Tauri's MSI (bundle.windows.wix.fragmentPaths and componentRefs in tauri.conf.json).
+
+     Install into a "Kaanna" folder of our own. With the stock dialogs, a folder picked with Change…
+     (or typed in) is used as is, so choosing "D:\Apps" would spill the app's files straight into it.
+     On Next, append the folder unless the path already ends with it or is where the app is already
+     installed (the dialog pre-fills that, and appending would leave a second copy behind). -->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Fragment>
+    <!-- The previous install location, looked up the same way Tauri's template fills INSTALLDIR
+         (Software\<manufacturer>\<product>; the manufacturer comes from the identifier dev.kaanna.app,
+         the product is productName in tauri.conf.json). -->
+    <Property Id="KAANNA_PREVIOUS_INSTALLDIR">
+      <RegistrySearch Id="KaannaPrevDirNsis" Root="HKCU" Key="Software\kaanna\Kaanna" Type="raw" />
+      <RegistrySearch Id="KaannaPrevDirMsi" Root="HKCU" Key="Software\kaanna\Kaanna" Name="InstallDir" Type="raw" />
+    </Property>
+
+    <UI Id="KaannaInstallDirSuffix">
+      <!-- Order 0: before the stock Next handler's SetTargetPath (order 1) commits the path.
+           Whichever of the two runs first, its result ends in "\Kaanna\", which stops the other. -->
+      <Publish Dialog="InstallDirDlg" Control="Next" Property="INSTALLDIR" Value="[INSTALLDIR]Kaanna\" Order="0"><![CDATA[INSTALLDIR >> "\" AND NOT (INSTALLDIR ~>> "\Kaanna\") AND INSTALLDIR <> KAANNA_PREVIOUS_INSTALLDIR]]></Publish>
+      <Publish Dialog="InstallDirDlg" Control="Next" Property="INSTALLDIR" Value="[INSTALLDIR]\Kaanna\" Order="0"><![CDATA[NOT (INSTALLDIR >> "\") AND NOT (INSTALLDIR ~>> "\Kaanna") AND INSTALLDIR <> KAANNA_PREVIOUS_INSTALLDIR]]></Publish>
+    </UI>
+
+    <!-- Fragments are linked only when something in them is referenced; Tauri references this
+         component, which pulls in the property and UI above. -->
+    <DirectoryRef Id="INSTALLDIR">
+      <Component Id="KaannaInstallDirSuffix" Guid="*">
+        <RegistryValue Root="HKCU" Key="Software\kaanna\Kaanna" Name="InstallDirSuffix" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+  </Fragment>
+</Wix>

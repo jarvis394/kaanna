@@ -80,15 +80,27 @@ the live VAD pipeline.
 ### Release builds
 
 `.github/workflows/build.yml` builds installers for macOS (Apple Silicon and Intel), Windows
-(x64: `.msi` and `.exe`) and Linux (x64: `.deb`, `.rpm`, `.AppImage`).
+(x64: `.msi` and `.exe` installers, plus a `_portable.zip` that runs without installing) and
+Linux (x64: `.deb`, `.rpm`, `.AppImage`). Bundles and install folders are named `Kaanna`, in
+plain ASCII; the app still calls itself Käännä. The Windows installers always install into a
+`Kaanna` folder, even when you pick a parent folder like `D:\Apps`, and keep an existing
+install where it is.
 
 * **Push a tag** such as `v0.2.0` to build everything and attach it to a *draft* GitHub release.
   Bump `version` in `src-tauri/tauri.conf.json` first, since that's what the file names use.
 * **Run it manually** from Actions → Build → *Run workflow* to get the installers as workflow
   artifacts without a release.
 
-Metal and Accelerate are macOS-only. On Windows and Linux, Whisper and translation run on the
-CPU, which is noticeably slower, and only input devices can be captured, not system audio.
+Metal and Accelerate are macOS-only. On Windows, Whisper runs on the GPU through Vulkan, falling
+back to the CPU without one. *Settings → Graphics processor* picks a specific GPU or *CPU only*;
+*Automatic* prefers a dedicated GPU. System audio on Windows is captured with WASAPI loopback
+from the default output device. On Linux, Whisper runs on the CPU, which is much slower, and
+only input devices can be captured. Translation always runs on the CPU (with Accelerate on
+macOS); it's fast enough everywhere.
+
+Windows release builds enable the `vulkan` Cargo feature, which needs the
+[Vulkan SDK](https://vulkan.lunarg.com/sdk/home#windows) to build. Without it,
+`bun run tauri build` produces a CPU-only build; add `--features vulkan` for GPU support.
 
 The builds aren't code-signed. On macOS, open the app once with right-click → *Open* (or
 *System Settings → Privacy & Security → Open Anyway*). On Windows, click past SmartScreen

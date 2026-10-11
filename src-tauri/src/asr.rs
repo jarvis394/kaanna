@@ -1,6 +1,8 @@
-//! Finnish speech recognition with whisper.cpp (Metal-accelerated on Apple Silicon).
+//! Finnish speech recognition with whisper.cpp (Metal on macOS, Vulkan on Windows).
 
 use anyhow::{Context, Result};
+use serde::Serialize;
+use std::ffi::CStr;
 use std::path::Path;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, WhisperState};
 
@@ -17,10 +19,69 @@ pub struct Transcript {
     pub no_speech_prob: f32,
 }
 
+/// A GPU Whisper can run on. `index` counts GPUs only, in the order whisper.cpp numbers them.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GpuInfo {
+    pub index: i32,
+    pub name: String,
+    pub integrated: bool,
+    /// Video memory in bytes; for integrated GPUs this is shared system memory.
+    pub memory: u64,
+}
+
+/// GPUs available for inference. Empty on macOS, where there is one GPU and Metal picks it,
+/// and on builds without a GPU backend.
+pub fn list_gpus() -> Vec<GpuInfo> {
+    if cfg!(target_os = "macos") {
+        return Vec::new();
+    }
+    use whisper_rs::whisper_rs_sys as sys;
+    let mut gpus = Vec::new();
+    // SAFETY: ggml's device registry is built once, thread-safely, on first use and never
+    // changes afterwards; the returned strings live as long as the registry.
+    unsafe {
+        for i in 0..sys::ggml_backend_dev_count() {
+            let dev = sys::ggml_backend_dev_get(i);
+            let kind = sys::ggml_backend_dev_type(dev);
+            let integrated = kind == sys::ggml_backend_dev_type_GGML_BACKEND_DEVICE_TYPE_IGPU;
+            if kind != sys::ggml_backend_dev_type_GGML_BACKEND_DEVICE_TYPE_GPU && !integrated {
+                continue;
+            }
+            let name = CStr::from_ptr(sys::ggml_backend_dev_description(dev)).to_string_lossy().trim().to_string();
+            let (mut free, mut total) = (0usize, 0usize);
+            sys::ggml_backend_dev_memory(dev, &mut free, &mut total);
+            gpus.push(GpuInfo { index: gpus.len() as i32, name, integrated, memory: total as u64 });
+        }
+    }
+    gpus
+}
+
+/// Resolve a processor preference to a GPU index, or `None` for the CPU.
+///
+/// `pref` is `"auto"`, `"cpu"` or `"gpu:<index>"`. Auto prefers a dedicated GPU, then an
+/// integrated one. A GPU that has disappeared (e.g. an unplugged eGPU) falls back to auto.
+pub fn resolve_device(pref: &str) -> Option<i32> {
+    if pref == "cpu" {
+        return None;
+    }
+    if cfg!(target_os = "macos") {
+        return Some(0);
+    }
+    let gpus = list_gpus();
+    let chosen = pref.strip_prefix("gpu:").and_then(|i| i.parse::<i32>().ok());
+    if let Some(i) = chosen.filter(|i| gpus.iter().any(|g| g.index == *i)) {
+        return Some(i);
+    }
+    gpus.iter().find(|g| !g.integrated).or(gpus.first()).map(|g| g.index)
+}
+
 impl Transcriber {
-    pub fn load(model: &Path) -> Result<Self> {
+    /// Load `model` onto GPU `gpu` (an index from [`list_gpus`]), or onto the CPU if `None`.
+    pub fn load(model: &Path, gpu: Option<i32>) -> Result<Self> {
         let params = WhisperContextParameters {
-            use_gpu: true,
+            use_gpu: gpu.is_some(),
+            gpu_device: gpu.unwrap_or(0),
             // Flash attention is slower here with a trimmed audio_ctx, and combined with
             // single-segment decoding it makes whisper.cpp emit garbage for this model.
             flash_attn: false,
@@ -40,7 +101,7 @@ impl Transcriber {
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
         params.set_language(Some("fi"));
         params.set_translate(false);
-        params.set_n_threads(4);
+        params.set_n_threads(threads());
         params.set_no_context(true);
         params.set_no_timestamps(true);
         params.set_suppress_blank(true);
@@ -80,6 +141,13 @@ impl Transcriber {
         }
         Ok(Transcript { text: text.trim().to_string(), no_speech_prob })
     }
+}
+
+/// CPU threads for inference. ggml scales with physical cores and slows down on hyperthreads,
+/// so assume two logical cores per physical one. Matters most where Whisper runs on the CPU.
+fn threads() -> i32 {
+    let logical = std::thread::available_parallelism().map_or(8, |n| n.get());
+    (logical / 2).clamp(4, 8) as i32
 }
 
 /// Encoder frames needed for `samples` of audio (1500 frames = 30 s), with headroom.

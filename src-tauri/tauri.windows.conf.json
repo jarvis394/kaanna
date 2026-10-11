@@ -1,0 +1,26 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Käännä",
+        "visible": false,
+        "width": 620,
+        "height": 300,
+        "minWidth": 420,
+        "minHeight": 200,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "resizable": true,
+        "shadow": true,
+        "theme": "Dark",
+        "windowEffects": {
+          "effects": ["blur"],
+          "color": [0, 0, 0, 0]
+        }
+      }
+    ]
+  }
+}

@@ -29,6 +29,10 @@
   --ease: cubic-bezier(0.23, 1, 0.32, 1);
   --toolbar-height: 48px;
 
+  /* Thin thumb on a clear track. Without this, Chromium on Windows draws classic scrollbars with
+     an opaque track; macOS keeps its overlay scrollbars. Inherited, so it covers every scroller. */
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, sans-serif;
   font-size: 13px;
   line-height: 1.38;
@@ -101,6 +105,45 @@ button {
   transition:
     opacity 150ms ease-out,
     border-color 150ms ease-out;
+}
+
+/* Brighter thumb while the pointer is over a scroller, like overlay scrollbars waking up. */
+.setup:hover,
+.settings:hover,
+.select-popup:hover {
+  scrollbar-color: rgba(255, 255, 255, 0.34) transparent;
+}
+
+.select-popup {
+  scrollbar-width: thin;
+}
+
+/* Popups can only blur page content, not the desktop, and backdrop-filter is unreliable in a
+   transparent WebView2, leaving the text behind a popup crisp through its 86% fill. Use a
+   denser fill there so menus read as solid surfaces, as Windows 11's own do. */
+html[data-platform="windows"] {
+  --popup: rgba(38, 38, 40, 0.97);
+}
+
+/* Windows 11 rounds frameless windows at 8px and clips the blurred backdrop there; follow it
+   so the hairline traces the real edge. */
+.app[data-platform="windows"] {
+  --radius: 8px;
+}
+
+/* Windows uses plain blur-behind, untinted, because the system acrylic turns opaque whenever the
+   window loses focus, and this overlay is unfocused most of the time. The tint does the
+   darkening instead: lighter while unfocused, a touch denser while focused so controls read
+   well. Skipped when an accessibility setting asks for a more opaque tint (see below). */
+@media (prefers-reduced-transparency: no-preference) and (prefers-contrast: no-preference) {
+  .app[data-platform="windows"] {
+    --tint: rgba(0, 0, 0, 0.42);
+    transition: background-color 250ms ease;
+  }
+
+  .app[data-platform="windows"][data-focused="true"] {
+    --tint: rgba(0, 0, 0, 0.5);
+  }
 }
 
 /* Clear the native close button (inset 16px, 14px wide). The minimise and zoom buttons are
@@ -385,6 +428,12 @@ button {
 .field-trigger:hover::before,
 .field-trigger[data-popup-open]::before {
   --bg: var(--surface-active);
+}
+
+/* Sized to fit a GPU name inside a settings row. */
+.field-trigger-compact {
+  width: 220px;
+  gap: 6px;
 }
 
 .source-trigger-icon {
@@ -772,13 +821,17 @@ button {
 
 /* ---------- setup ---------- */
 
+/* The toolbar never hides on these screens, so they scroll below it rather than under it:
+   nothing shows through the toolbar, and the scrollbar starts at its divider. Content dissolves
+   into the top edge as it scrolls away. */
 .setup,
 .settings {
   flex: 1;
+  margin-top: var(--toolbar-height);
   overflow-y: auto;
-  padding: calc(var(--toolbar-height) + 16px) 18px 18px;
+  padding: 16px 18px 18px;
   scrollbar-width: thin;
-  mask-image: linear-gradient(to bottom, transparent calc(var(--toolbar-height) - 4px), #000 calc(var(--toolbar-height) + 12px));
+  mask-image: linear-gradient(to bottom, transparent 0, #000 12px);
 }
 
 .setup {
@@ -800,10 +853,14 @@ button {
   max-width: 520px;
 }
 
-.setup > .btn {
-  /* Primary action sits bottom-right, as in macOS dialogs. */
-  align-self: flex-end;
-  height: 28px;
+/* Actions sit bottom-right with the primary one last, as in macOS dialogs. */
+.setup-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.setup-actions .btn {
   padding: 0 14px;
 }
 

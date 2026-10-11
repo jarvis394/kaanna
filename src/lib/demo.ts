@@ -74,6 +74,12 @@ export function installDemoBackend() {
           return sources;
         case "list_models":
           return models.map((m) => ({ ...m }));
+        case "list_gpus":
+          // A typical gaming laptop, so the processor menu shows up in the demo.
+          return [
+            { index: 0, name: "Intel(R) UHD Graphics 770", integrated: true, memory: 16_000_000_000 },
+            { index: 1, name: "NVIDIA GeForce RTX 4060 Laptop GPU", integrated: false, memory: 8_585_740_288 },
+          ];
         case "default_asr_model":
           return "asr-fi-large-v3-q5";
         case "get_settings":
