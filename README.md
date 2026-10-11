@@ -80,7 +80,11 @@ the live VAD pipeline.
 ### Release builds
 
 `.github/workflows/build.yml` builds installers for macOS (Apple Silicon and Intel), Windows
-(x64: `.msi` and `.exe`) and Linux (x64: `.deb`, `.rpm`, `.AppImage`).
+(x64: `.msi` and `.exe` installers, plus a `_portable.zip` that runs without installing) and
+Linux (x64: `.deb`, `.rpm`, `.AppImage`). Bundles and install folders are named `Kaanna`, in
+plain ASCII; the app still calls itself Käännä. The Windows installers always install into a
+`Kaanna` folder, even when you pick a parent folder like `D:\Apps`, and keep an existing
+install where it is.
 
 * **Push a tag** such as `v0.2.0` to build everything and attach it to a *draft* GitHub release.
   Bump `version` in `src-tauri/tauri.conf.json` first, since that's what the file names use.

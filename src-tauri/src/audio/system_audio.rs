@@ -80,7 +80,7 @@ impl SCStreamOutputTrait for DiscardFrames {
 pub fn start(sink: SampleSink) -> Result<Capture> {
     let content = SCShareableContent::get().map_err(|e| {
         anyhow!(
-            "Can't access system audio ({e}). Allow Käännä under System Settings → Privacy & \
+            "Can't access system audio ({e}). Allow Kaanna under System Settings → Privacy & \
              Security → Screen & System Audio Recording, then restart the app."
         )
     })?;

@@ -128,9 +128,28 @@ jobs:
           # Only tag pushes publish; manual runs just build.
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
           releaseName: Käännä ${{ github.ref_name }}
-          releaseBody: Unsigned builds. See the README for first-launch steps on each platform.
+          releaseBody: Unsigned builds. See the README for first-launch steps on each platform. The Windows *_portable.zip runs without installing.
           releaseDraft: true
           prerelease: false
+
+      # The app's exe is self-contained (the UI is embedded; WebView2 ships with Windows 10/11),
+      # so a zip of it runs without installing. Settings and models still live in the user's
+      # profile under dev.kaanna.app, shared with an installed copy.
+      - name: Portable zip
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $version = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          $release = "$env:CARGO_TARGET_DIR\${{ matrix.target }}\release"
+          $stage = "$env:RUNNER_TEMP\portable"
+          New-Item -ItemType Directory -Force $stage, "$release\bundle\portable" | Out-Null
+          Copy-Item "$release\kaanna.exe" "$stage\Kaanna.exe"
+          $zip = "$release\bundle\portable\Kaanna_${version}_x64_portable.zip"
+          Compress-Archive -Path "$stage\*" -DestinationPath $zip -Force
+          # Tag builds: attach it to the draft release tauri-action just created.
+          if ("${{ github.ref_type }}" -eq "tag") { gh release upload "${{ github.ref_name }}" $zip --clobber }
 
       - uses: actions/upload-artifact@v4
         with:
@@ -143,3 +162,4 @@ jobs:
             ${{ env.CARGO_TARGET_DIR || 'src-tauri/target' }}/${{ matrix.target }}/release/bundle/appimage/*.AppImage
             ${{ env.CARGO_TARGET_DIR || 'src-tauri/target' }}/${{ matrix.target }}/release/bundle/msi/*.msi
             ${{ env.CARGO_TARGET_DIR || 'src-tauri/target' }}/${{ matrix.target }}/release/bundle/nsis/*.exe
+            ${{ env.CARGO_TARGET_DIR || 'src-tauri/target' }}/${{ matrix.target }}/release/bundle/portable/*.zip
