@@ -109,7 +109,8 @@ button {
   --radius: 8px;
 }
 
-@media not (prefers-reduced-transparency: reduce) {
+/* Only when no accessibility setting asks for a more opaque tint (see the media queries below). */
+@media (prefers-reduced-transparency: no-preference) and (prefers-contrast: no-preference) {
   .app[data-platform="windows"] {
     --tint: rgba(0, 0, 0, 0.3);
   }
@@ -818,10 +819,14 @@ button {
   max-width: 520px;
 }
 
-.setup > .btn {
-  /* Primary action sits bottom-right, as in macOS dialogs. */
-  align-self: flex-end;
-  height: 28px;
+/* Actions sit bottom-right with the primary one last, as in macOS dialogs. */
+.setup-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.setup-actions .btn {
   padding: 0 14px;
 }
 

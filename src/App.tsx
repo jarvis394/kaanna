@@ -183,11 +183,12 @@ export default function App() {
     if (listening && models.find((m) => m.id === id)?.installed) start(sourceId, id);
   };
 
-  // The model reloads onto the new processor on the next start; restart now if translating.
+  // The model reloads onto the new processor on the next start. Restart now if translating or
+  // still loading: the new start supersedes the in-flight load.
   const changeDevice = (d: Device) => {
     setDevice(d);
     prefs.set("device", d);
-    if (listening) start(sourceId, asrModel, d);
+    if (listening || loading) start(sourceId, asrModel, d);
   };
 
   const changeSettings = (s: Settings) => {

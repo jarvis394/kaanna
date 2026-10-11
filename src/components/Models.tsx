@@ -19,7 +19,11 @@ function DeleteButton({ onDelete }: { onDelete: () => void }) {
     <button
       className="btn btn-ghost btn-sm"
       data-danger={armed || undefined}
-      onClick={() => (armed ? onDelete() : setArmed(true))}
+      onClick={() => {
+        // Disarm on firing, so a double-click or a failed delete can't fire it again.
+        setArmed(!armed);
+        if (armed) onDelete();
+      }}
       onBlur={() => setArmed(false)}
     >
       {armed ? "Confirm delete" : "Delete"}
@@ -141,16 +145,19 @@ export function Setup({ required, downloads, error, onDownload, onCancel }: Setu
         ))}
       </div>
       {error && <div className="inline-error">{error}</div>}
-      {pending.length > 0 ? (
-        <button className="btn btn-primary" onClick={downloadPending}>
-          {busy ? "Download the rest" : "Download all"} · {formatBytes(pendingSize)}
-        </button>
-      ) : (
-        busy && (
-          <button className="btn btn-ghost" onClick={cancelAll}>
-            Cancel all
-          </button>
-        )
+      {(busy || pending.length > 0) && (
+        <div className="setup-actions">
+          {busy && (
+            <button className="btn btn-ghost" onClick={cancelAll}>
+              Cancel all
+            </button>
+          )}
+          {pending.length > 0 && (
+            <button className="btn btn-primary" onClick={downloadPending}>
+              {busy ? "Download the rest" : "Download all"} · {formatBytes(pendingSize)}
+            </button>
+          )}
+        </div>
       )}
     </div>
   );

@@ -87,11 +87,16 @@ the live VAD pipeline.
 * **Run it manually** from Actions → Build → *Run workflow* to get the installers as workflow
   artifacts without a release.
 
-Metal and Accelerate are macOS-only. On Windows, Whisper runs on the GPU through Vulkan (falling
-back to the CPU without one; *Settings → Graphics processor* picks which GPU, preferring a
-dedicated one) and system audio is captured with WASAPI loopback from the default
-output device. On Linux, Whisper runs on the CPU, which is much slower, and only input devices
-can be captured. Translation runs on the CPU everywhere but macOS; it's fast enough there.
+Metal and Accelerate are macOS-only. On Windows, Whisper runs on the GPU through Vulkan, falling
+back to the CPU without one. *Settings → Graphics processor* picks a specific GPU or *CPU only*;
+*Automatic* prefers a dedicated GPU. System audio on Windows is captured with WASAPI loopback
+from the default output device. On Linux, Whisper runs on the CPU, which is much slower, and
+only input devices can be captured. Translation always runs on the CPU (with Accelerate on
+macOS); it's fast enough everywhere.
+
+Windows release builds enable the `vulkan` Cargo feature, which needs the
+[Vulkan SDK](https://vulkan.lunarg.com/sdk/home#windows) to build. Without it,
+`bun run tauri build` produces a CPU-only build; add `--features vulkan` for GPU support.
 
 The builds aren't code-signed. On macOS, open the app once with right-click → *Open* (or
 *System Settings → Privacy & Security → Open Anyway*). On Windows, click past SmartScreen

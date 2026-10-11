@@ -42,15 +42,52 @@ pub fn start(device_id: &str, sink: SampleSink) -> Result<Capture> {
 
 /// Windows: record what's playing on the default output device. WASAPI switches to loopback
 /// capture when an input stream is opened on an output device; no virtual driver needed.
+///
+/// Loopback delivers nothing while nothing plays, but the segmenter needs to hear the pause to
+/// end a sentence, so gaps are filled with silence.
 #[cfg(windows)]
 pub fn start_loopback(sink: SampleSink) -> Result<Capture> {
-    run(sink, || {
+    use parking_lot::Mutex;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    const TICK: Duration = Duration::from_millis(20);
+    const GAP: Duration = Duration::from_millis(100);
+    let sink = Arc::new(Mutex::new(sink));
+    let last = Arc::new(Mutex::new(Instant::now()));
+    let feed: SampleSink = {
+        let (sink, last) = (sink.clone(), last.clone());
+        Box::new(move |samples: &[f32]| {
+            *last.lock() = Instant::now();
+            (sink.lock())(samples);
+        })
+    };
+    let capture = run(feed, || {
         let device = cpal::default_host()
             .default_output_device()
             .context("no audio output device")?;
         let config = device.default_output_config().context("reading output format")?;
         Ok((device, config))
-    })
+    })?;
+
+    let stop = Arc::new(AtomicBool::new(false));
+    {
+        let stop = stop.clone();
+        let silence = vec![0.0f32; crate::asr::SAMPLE_RATE * TICK.as_millis() as usize / 1000];
+        std::thread::Builder::new().name("loopback-silence".into()).spawn(move || {
+            while !stop.load(Ordering::Relaxed) {
+                std::thread::sleep(TICK);
+                if last.lock().elapsed() >= GAP {
+                    (sink.lock())(&silence);
+                }
+            }
+        })?;
+    }
+    Ok(Capture::new(move || {
+        stop.store(true, Ordering::Relaxed);
+        drop(capture);
+    }))
 }
 
 /// Open a device and stream it into `sink` until the returned Capture is dropped.
