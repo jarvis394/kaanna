@@ -331,14 +331,20 @@ fn show_main(app: &AppHandle) {
     }
 }
 
-/// Hide the overlay. Nobody can see the subtitles then, so stop listening too.
 fn hide_main(app: &AppHandle) {
-    stop_listening(app);
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.hide();
     }
 }
 
+/// Closing means "I'm done": hide the overlay and stop listening.
+fn close_main(app: &AppHandle) {
+    stop_listening(app);
+    hide_main(app);
+}
+
+/// The global shortcut only shows and hides the overlay; translation keeps running while it's
+/// hidden, so bringing it back doesn't drop the session or the models.
 fn toggle_main(app: &AppHandle) {
     let visible = app
         .get_webview_window("main")
@@ -437,7 +443,7 @@ pub fn run() {
             // item quits, and the Dock or menu bar icon brings it back.
             if let WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
-                hide_main(window.app_handle());
+                close_main(window.app_handle());
             }
         })
         .invoke_handler(tauri::generate_handler![
