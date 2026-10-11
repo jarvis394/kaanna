@@ -57,6 +57,7 @@ export default function App() {
   const [panel, setPanel] = useState<"transcript" | "settings">("transcript");
   const [pinned, setPinned] = useState(true);
   const [hovered, setHovered] = useState(true);
+  const [focused, setFocused] = useState(() => document.hasFocus());
   const [toggleShortcut, setToggleShortcut] = useState(() => prefs.get("toggleShortcut", DEFAULT_TOGGLE_SHORTCUT));
   const [cleared, setCleared] = useState<Utterance[] | null>(null);
   const undoTimer = useRef<number | undefined>(undefined);
@@ -101,6 +102,17 @@ export default function App() {
       subs.forEach((s) => s.then((f) => f()));
     };
   }, [refreshSources, refreshModels]);
+
+  useEffect(() => {
+    const onFocus = () => setFocused(true);
+    const onBlur = () => setFocused(false);
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, []);
 
   // The window starts hidden. Reveal it once the model list is in, so the first frame is already
   // the right screen (setup or transcript), and after a paint so it's never blank.
@@ -290,6 +302,7 @@ export default function App() {
         className="app"
         data-platform={platform}
         data-quiet={quiet}
+        data-focused={focused}
         data-view={screen}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}

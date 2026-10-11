@@ -103,16 +103,24 @@ button {
     border-color 150ms ease-out;
 }
 
-/* Windows 11 rounds frameless windows at 8px and clips the acrylic backdrop there; follow it
-   so the hairline traces the real edge. The acrylic is already tinted, so darken it less. */
+/* Windows 11 rounds frameless windows at 8px and clips the blurred backdrop there; follow it
+   so the hairline traces the real edge. */
 .app[data-platform="windows"] {
   --radius: 8px;
 }
 
-/* Only when no accessibility setting asks for a more opaque tint (see the media queries below). */
+/* Windows uses plain blur-behind, untinted, because the system acrylic turns opaque whenever the
+   window loses focus, and this overlay is unfocused most of the time. The tint does the
+   darkening instead: lighter while unfocused, a touch denser while focused so controls read
+   well. Skipped when an accessibility setting asks for a more opaque tint (see below). */
 @media (prefers-reduced-transparency: no-preference) and (prefers-contrast: no-preference) {
   .app[data-platform="windows"] {
-    --tint: rgba(0, 0, 0, 0.3);
+    --tint: rgba(0, 0, 0, 0.42);
+    transition: background-color 250ms ease;
+  }
+
+  .app[data-platform="windows"][data-focused="true"] {
+    --tint: rgba(0, 0, 0, 0.5);
   }
 }
 

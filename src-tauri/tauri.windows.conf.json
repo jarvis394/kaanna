@@ -17,8 +17,8 @@
         "shadow": true,
         "theme": "Dark",
         "windowEffects": {
-          "effects": ["acrylic"],
-          "state": "active"
+          "effects": ["blur"],
+          "color": [0, 0, 0, 0]
         }
       }
     ]
