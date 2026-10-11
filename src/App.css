@@ -821,13 +821,17 @@ html[data-platform="windows"] {
 
 /* ---------- setup ---------- */
 
+/* The toolbar never hides on these screens, so they scroll below it rather than under it:
+   nothing shows through the toolbar, and the scrollbar starts at its divider. Content dissolves
+   into the top edge as it scrolls away. */
 .setup,
 .settings {
   flex: 1;
+  margin-top: var(--toolbar-height);
   overflow-y: auto;
-  padding: calc(var(--toolbar-height) + 16px) 18px 18px;
+  padding: 16px 18px 18px;
   scrollbar-width: thin;
-  mask-image: linear-gradient(to bottom, transparent calc(var(--toolbar-height) - 4px), #000 calc(var(--toolbar-height) + 12px));
+  mask-image: linear-gradient(to bottom, transparent 0, #000 12px);
 }
 
 .setup {
