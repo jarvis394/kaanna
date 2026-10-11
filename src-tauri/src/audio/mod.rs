@@ -13,6 +13,8 @@ pub type SampleSink = Box<dyn FnMut(&[f32]) + Send + 'static>;
 #[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SourceKind {
+    /// System-audio capture exists only on macOS (ScreenCaptureKit).
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     System,
     Input,
 }
