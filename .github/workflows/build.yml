@@ -44,6 +44,14 @@ jobs:
             libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev \
             libssl-dev patchelf libasound2-dev cmake clang libclang-dev
 
+      # screencapturekit's Metal bridge needs the macOS 26 SDK; the macos-15 images default to
+      # Xcode 16 but ship Xcode 26 alongside it.
+      - name: Select Xcode 26
+        if: runner.os == 'macOS'
+        run: |
+          sudo xcode-select -s "$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)"
+          xcodebuild -version
+
       - uses: oven-sh/setup-bun@v2
 
       # Matches the local toolchain; candle 0.10.2 is pinned for it (see README → Notes).
