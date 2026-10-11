@@ -103,6 +103,18 @@ button {
     border-color 150ms ease-out;
 }
 
+/* Windows 11 rounds frameless windows at 8px and clips the acrylic backdrop there; follow it
+   so the hairline traces the real edge. The acrylic is already tinted, so darken it less. */
+.app[data-platform="windows"] {
+  --radius: 8px;
+}
+
+@media not (prefers-reduced-transparency: reduce) {
+  .app[data-platform="windows"] {
+    --tint: rgba(0, 0, 0, 0.3);
+  }
+}
+
 /* Clear the native close button (inset 16px, 14px wide). The minimise and zoom buttons are
    hidden, see `close_button_only`. */
 .app[data-platform="mac"] .toolbar {
@@ -385,6 +397,12 @@ button {
 .field-trigger:hover::before,
 .field-trigger[data-popup-open]::before {
   --bg: var(--surface-active);
+}
+
+/* Sized to fit a GPU name inside a settings row. */
+.field-trigger-compact {
+  width: 220px;
+  gap: 6px;
 }
 
 .source-trigger-icon {

@@ -8,13 +8,16 @@ mod system_audio;
 use anyhow::{bail, Result};
 use serde::Serialize;
 
+#[cfg(any(target_os = "macos", windows))]
+const SYSTEM_ID: &str = "system";
+
 pub type SampleSink = Box<dyn FnMut(&[f32]) + Send + 'static>;
 
 #[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SourceKind {
-    /// System-audio capture exists only on macOS (ScreenCaptureKit).
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    /// System-audio capture: ScreenCaptureKit on macOS, WASAPI loopback on Windows.
+    #[cfg_attr(not(any(target_os = "macos", windows)), allow(dead_code))]
     System,
     Input,
 }
@@ -49,9 +52,9 @@ impl Drop for Capture {
 
 pub fn list_sources() -> Vec<SourceInfo> {
     let mut sources = Vec::new();
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     sources.push(SourceInfo {
-        id: system_audio::ID.into(),
+        id: SYSTEM_ID.into(),
         name: "System audio".into(),
         kind: SourceKind::System,
         is_default: false,
@@ -62,8 +65,12 @@ pub fn list_sources() -> Vec<SourceInfo> {
 
 pub fn start(source_id: &str, sink: SampleSink) -> Result<Capture> {
     #[cfg(target_os = "macos")]
-    if source_id == system_audio::ID {
+    if source_id == SYSTEM_ID {
         return system_audio::start(sink);
+    }
+    #[cfg(windows)]
+    if source_id == SYSTEM_ID {
+        return input_device::start_loopback(sink);
     }
     if let Some(id) = source_id.strip_prefix(input_device::ID_PREFIX) {
         return input_device::start(id, sink);

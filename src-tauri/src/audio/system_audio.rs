@@ -8,8 +8,6 @@ use anyhow::{anyhow, Context, Result};
 use parking_lot::Mutex;
 use screencapturekit::prelude::*;
 
-pub const ID: &str = "system";
-
 /// kAudioFormatFlagIsNonInterleaved
 const NON_INTERLEAVED: u32 = 1 << 5;
 

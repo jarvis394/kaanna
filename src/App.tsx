@@ -11,7 +11,7 @@ import { SourceSelect } from "./components/SourceSelect";
 import { Spinner } from "./components/Spinner";
 import { Transcript } from "./components/Transcript";
 import { usePresence } from "./lib/presence";
-import { api, isMac, on, prefs, type Model, type Settings, type Source, type Status, type Utterance } from "./lib/api";
+import { api, isMac, on, platform, prefs, type Device, type Gpu, type Model, type Settings, type Source, type Status, type Utterance } from "./lib/api";
 import "./App.css";
 
 const MAX_LINES = 60;
@@ -46,6 +46,8 @@ export default function App() {
   const [sourceId, setSourceId] = useState<string | null>(() => prefs.get("source", null));
   const [models, setModels] = useState<Model[]>([]);
   const [asrModel, setAsrModel] = useState<string | null>(() => prefs.get("asrModel", null));
+  const [gpus, setGpus] = useState<Gpu[]>([]);
+  const [device, setDevice] = useState<Device>(() => prefs.get("device", "auto"));
   const [settings, setSettings] = useState<Settings | null>(null);
   const [view, setView] = useState<ViewPrefs>(() => prefs.get("view", { showOriginal: true, fontSize: 20 }));
   const [status, setStatus] = useState<Status>({ state: "idle" });
@@ -70,6 +72,7 @@ export default function App() {
   useEffect(() => {
     refreshSources();
     refreshModels();
+    api.listGpus().then(setGpus).catch(() => setGpus([]));
     api.defaultAsrModel().then((d) => setAsrModel((cur) => cur ?? d));
     api.getSettings().then((defaults) => {
       const s = { ...defaults, ...prefs.get<Partial<Settings>>("settings", {}) };
@@ -116,20 +119,25 @@ export default function App() {
   const loading = status.state === "loading";
 
   const start = useCallback(
-    async (src = sourceId, model = asrModel) => {
+    async (src = sourceId, model = asrModel, dev = device) => {
       if (!src || !model) return;
       setError(null);
       try {
-        await api.start(src, model);
+        await api.start(src, model, dev);
       } catch (e) {
         setError(String(e));
       }
     },
-    [sourceId, asrModel],
+    [sourceId, asrModel, device],
   );
 
+  // Models with a download running, so a second click (or "Download all") never starts a duplicate,
+  // whose immediate "already in progress" reply would clear the first one's progress.
+  const inFlight = useRef(new Set<string>());
   const download = useCallback(
     async (id: string) => {
+      if (inFlight.current.has(id)) return false;
+      inFlight.current.add(id);
       setError(null);
       // Show progress (and the Cancel button) right away, before the first byte arrives.
       const size = models.find((m) => m.id === id)?.size ?? 0;
@@ -140,22 +148,13 @@ export default function App() {
         setError(`Download failed: ${e}`);
         return false;
       } finally {
+        inFlight.current.delete(id);
         setDownloads((d) => ({ ...d, [id]: undefined }));
         await refreshModels();
       }
     },
     [models, refreshModels],
   );
-
-  const downloadAllCancelled = useRef(false);
-  const downloadAll = async () => {
-    downloadAllCancelled.current = false;
-    // Small ones first so progress feels alive; one at a time keeps bandwidth focused.
-    const missing = [...required].filter((m) => !m.installed).sort((a, b) => a.size - b.size);
-    for (const m of missing) {
-      if (downloadAllCancelled.current || !(await download(m.id))) break;
-    }
-  };
 
   const cancelDownload = (id: string) => {
     api.cancelDownload(id).catch((e) => setError(String(e)));
@@ -172,11 +171,6 @@ export default function App() {
     }
   };
 
-  const cancelAll = () => {
-    downloadAllCancelled.current = true;
-    Object.keys(downloads).filter((id) => downloads[id]).forEach(cancelDownload);
-  };
-
   const changeSource = (id: string) => {
     setSourceId(id);
     prefs.set("source", id);
@@ -187,6 +181,13 @@ export default function App() {
     setAsrModel(id);
     prefs.set("asrModel", id);
     if (listening && models.find((m) => m.id === id)?.installed) start(sourceId, id);
+  };
+
+  // The model reloads onto the new processor on the next start; restart now if translating.
+  const changeDevice = (d: Device) => {
+    setDevice(d);
+    prefs.set("device", d);
+    if (listening) start(sourceId, asrModel, d);
   };
 
   const changeSettings = (s: Settings) => {
@@ -286,7 +287,7 @@ export default function App() {
     <Tooltip.Provider delay={500}>
       <div
         className="app"
-        data-platform={isMac ? "mac" : "other"}
+        data-platform={platform}
         data-quiet={quiet}
         data-view={screen}
         onMouseEnter={() => setHovered(true)}
@@ -374,6 +375,10 @@ export default function App() {
               models={models}
               asrModel={asrModel}
               onAsrModel={changeAsrModel}
+              required={required}
+              gpus={gpus}
+              device={device}
+              onDevice={changeDevice}
               downloads={downloads}
               onDownload={download}
               onCancelDownload={cancelDownload}
@@ -383,7 +388,7 @@ export default function App() {
               onToggleShortcut={changeToggleShortcut}
             />
           ) : screen === "setup" ? (
-            <Setup required={required} downloads={downloads} error={error} onDownloadAll={downloadAll} onCancel={cancelAll} />
+            <Setup required={required} downloads={downloads} error={error} onDownload={download} onCancel={cancelDownload} />
           ) : (
             <Transcript lines={lines} showOriginal={view.showOriginal} fontSize={view.fontSize} listening={listening} />
           )}

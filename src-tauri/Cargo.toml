@@ -28,7 +28,7 @@ crossbeam-channel = "0.5"
 log = "0.4"
 env_logger = "0.11"
 cpal = "0.18"
-whisper-rs = { version = "0.16", features = ["log_backend"] }
+whisper-rs = { version = "0.16", features = ["log_backend", "raw-api"] }
 candle-core = "=0.10.2"
 candle-nn = "=0.10.2"
 candle-transformers = "=0.10.2"
@@ -52,6 +52,13 @@ candle-transformers = { version = "=0.10.2", features = ["accelerate"] }
 screencapturekit = "11"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSAnimation", "NSAnimationContext", "NSButton", "NSControl", "NSResponder", "NSView", "NSWindow"] }
+
+[target.'cfg(windows)'.dependencies]
+# Whisper on the GPU through Vulkan, which every current Windows GPU driver ships. Large v3 on the
+# CPU takes over a minute per sentence. Without a usable GPU whisper.cpp falls back to the CPU.
+whisper-rs = { version = "0.16", features = ["vulkan"] }
+# Strips the hairline DWM draws around frameless windows (see `borderless_frame`).
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dwm"] }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-global-shortcut = "2"

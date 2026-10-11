@@ -19,6 +19,17 @@ export interface Model {
   installed: boolean;
 }
 
+export interface Gpu {
+  /** Position among GPUs, as whisper.cpp numbers them. */
+  index: number;
+  name: string;
+  integrated: boolean;
+  memory: number;
+}
+
+/** Where speech recognition runs: "auto", "cpu" or "gpu:<index>". */
+export type Device = string;
+
 export interface Settings {
   pauseMs: number;
   maxUtteranceSecs: number;
@@ -56,6 +67,8 @@ export interface Level {
 export const api = {
   listSources: () => invoke<Source[]>("list_sources"),
   listModels: () => invoke<Model[]>("list_models"),
+  /** GPUs speech recognition can use; empty on macOS (Metal picks the one GPU) and without a GPU backend. */
+  listGpus: () => invoke<Gpu[]>("list_gpus"),
   defaultAsrModel: () => invoke<string>("default_asr_model"),
   /** Resolves to true once installed, false if cancelled. */
   downloadModel: (id: string) => invoke<boolean>("download_model", { id }),
@@ -65,7 +78,7 @@ export const api = {
   revealWindow: () => invoke<void>("reveal_window"),
   /** macOS: fade the native close button along with the toolbar. */
   setWindowControlsVisible: (visible: boolean) => invoke<void>("set_window_controls_visible", { visible }),
-  start: (sourceId: string, asrModel: string) => invoke<void>("start", { sourceId, asrModel }),
+  start: (sourceId: string, asrModel: string, device: Device) => invoke<void>("start", { sourceId, asrModel, device }),
   stop: () => invoke<void>("stop"),
   getSettings: () => invoke<Settings>("get_settings"),
   setSettings: (settings: Settings) => invoke<void>("set_settings", { settings }),
@@ -88,6 +101,8 @@ export function on<K extends keyof Events>(event: K, cb: (payload: Events[K]) =>
 
 /** macOS draws the native close button; elsewhere the window is frameless with our own close button. */
 export const isMac = navigator.userAgent.includes("Mac");
+export const platform = isMac ? "mac" : navigator.userAgent.includes("Windows") ? "windows" : "other";
+export const thisDevice = { mac: "this Mac", windows: "this PC", other: "this computer" }[platform];
 
 export function formatBytes(n: number): string {
   if (n >= 1e9) return `${(n / 1e9).toFixed(2)} GB`;

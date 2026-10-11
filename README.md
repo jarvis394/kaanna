@@ -87,8 +87,11 @@ the live VAD pipeline.
 * **Run it manually** from Actions → Build → *Run workflow* to get the installers as workflow
   artifacts without a release.
 
-Metal and Accelerate are macOS-only. On Windows and Linux, Whisper and translation run on the
-CPU, which is noticeably slower, and only input devices can be captured, not system audio.
+Metal and Accelerate are macOS-only. On Windows, Whisper runs on the GPU through Vulkan (falling
+back to the CPU without one; *Settings → Graphics processor* picks which GPU, preferring a
+dedicated one) and system audio is captured with WASAPI loopback from the default
+output device. On Linux, Whisper runs on the CPU, which is much slower, and only input devices
+can be captured. Translation runs on the CPU everywhere but macOS; it's fast enough there.
 
 The builds aren't code-signed. On macOS, open the app once with right-click → *Open* (or
 *System Settings → Privacy & Security → Open Anyway*). On Windows, click past SmartScreen
