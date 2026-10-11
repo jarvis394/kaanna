@@ -29,6 +29,10 @@
   --ease: cubic-bezier(0.23, 1, 0.32, 1);
   --toolbar-height: 48px;
 
+  /* Thin thumb on a clear track. Without this, Chromium on Windows draws classic scrollbars with
+     an opaque track; macOS keeps its overlay scrollbars. Inherited, so it covers every scroller. */
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, sans-serif;
   font-size: 13px;
   line-height: 1.38;
@@ -101,6 +105,24 @@ button {
   transition:
     opacity 150ms ease-out,
     border-color 150ms ease-out;
+}
+
+/* Brighter thumb while the pointer is over a scroller, like overlay scrollbars waking up. */
+.setup:hover,
+.settings:hover,
+.select-popup:hover {
+  scrollbar-color: rgba(255, 255, 255, 0.34) transparent;
+}
+
+.select-popup {
+  scrollbar-width: thin;
+}
+
+/* Popups can only blur page content, not the desktop, and backdrop-filter is unreliable in a
+   transparent WebView2, leaving the text behind a popup crisp through its 86% fill. Use a
+   denser fill there so menus read as solid surfaces, as Windows 11's own do. */
+html[data-platform="windows"] {
+  --popup: rgba(38, 38, 40, 0.97);
 }
 
 /* Windows 11 rounds frameless windows at 8px and clips the blurred backdrop there; follow it
