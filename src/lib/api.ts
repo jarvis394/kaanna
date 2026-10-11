@@ -62,6 +62,8 @@ export const api = {
   stop: () => invoke<void>("stop"),
   getSettings: () => invoke<Settings>("get_settings"),
   setSettings: (settings: Settings) => invoke<void>("set_settings", { settings }),
+  /** Global show/hide shortcut as an accelerator, e.g. "Command+Alt+Backslash"; null pauses it. */
+  setToggleShortcut: (shortcut: string | null) => invoke<void>("set_toggle_shortcut", { shortcut }),
 };
 
 type Events = {

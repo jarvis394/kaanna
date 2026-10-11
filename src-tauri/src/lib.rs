@@ -10,14 +10,22 @@ use pipeline::{Engine, Session, Settings};
 use serde::Serialize;
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
+use tauri::image::Image;
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::{AppHandle, Emitter, Manager, RunEvent, State, WindowEvent};
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 struct AppState {
     models_dir: PathBuf,
     engine: Arc<Engine>,
     session: Mutex<Option<Session>>,
+    /// Bumped by every start and stop, so a start whose models finish loading after the user
+    /// pressed Stop can tell it's been superseded.
+    attempt: AtomicU64,
     settings: Arc<RwLock<Settings>>,
     downloads: Mutex<HashSet<String>>,
 }
@@ -77,24 +85,36 @@ async fn download_model(app: AppHandle, state: State<'_, AppState>, id: String) 
 async fn start(app: AppHandle, state: State<'_, AppState>, source_id: String, asr_model: String) -> CmdResult<()> {
     // Tear down the previous session first so two captures never run at once.
     state.session.lock().take();
+    let attempt = state.attempt.fetch_add(1, Ordering::SeqCst) + 1;
+    let is_current = {
+        let app = app.clone();
+        move || app.state::<AppState>().attempt.load(Ordering::SeqCst) == attempt
+    };
 
     let _ = app.emit("status", Status::Loading("Loading models…".into()));
-    let (engine, root) = (state.engine.clone(), state.models_dir.clone());
-    let loaded = tauri::async_runtime::spawn_blocking(move || engine.prepare(&root, &asr_model))
+    let (engine, root, still_wanted) = (state.engine.clone(), state.models_dir.clone(), is_current.clone());
+    let loaded = tauri::async_runtime::spawn_blocking(move || engine.prepare(&root, &asr_model, &still_wanted))
         .await
         .map_err(|e| e.to_string())?;
+
+    // Decide under the session lock so a concurrent Stop either lands before (we bail) or after
+    // (it takes the session we store). Status is emitted under the lock for the same reason.
+    let mut session = state.session.lock();
+    if !is_current() {
+        // Stopped while loading; Stop already reported idle.
+        return Ok(());
+    }
     let (asr, mt) = match loaded {
-        Ok(m) => m,
+        Ok(Some(m)) => m,
+        Ok(None) => return Ok(()),
         Err(e) => {
             let _ = app.emit("status", Status::Idle);
             return Err(err(e));
         }
     };
-
-    let session = pipeline::start(app.clone(), &state.models_dir, &source_id, asr, mt, state.settings.clone());
-    match session {
+    match pipeline::start(app.clone(), &state.models_dir, &source_id, asr, mt, state.settings.clone()) {
         Ok(s) => {
-            *state.session.lock() = Some(s);
+            *session = Some(s);
             let _ = app.emit("status", Status::Listening);
             Ok(())
         }
@@ -106,8 +126,16 @@ async fn start(app: AppHandle, state: State<'_, AppState>, source_id: String, as
 }
 
 #[tauri::command]
-fn stop(app: AppHandle, state: State<'_, AppState>) {
-    state.session.lock().take();
+fn stop(app: AppHandle) {
+    stop_listening(&app);
+}
+
+/// Stop capturing, or abandon a start that is still loading models.
+fn stop_listening(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    state.attempt.fetch_add(1, Ordering::SeqCst);
+    let mut session = state.session.lock();
+    session.take();
     let _ = app.emit("status", Status::Idle);
 }
 
@@ -119,6 +147,77 @@ fn get_settings(state: State<'_, AppState>) -> Settings {
 #[tauri::command]
 fn set_settings(state: State<'_, AppState>, settings: Settings) {
     *state.settings.write() = settings;
+}
+
+/// Replace the global show/hide shortcut. `None` pauses it, e.g. while the user records a new one.
+#[tauri::command]
+fn set_toggle_shortcut(app: AppHandle, shortcut: Option<String>) -> Result<(), String> {
+    let next = shortcut
+        .as_deref()
+        .map(str::parse::<Shortcut>)
+        .transpose()
+        .map_err(|e| format!("Not a valid shortcut: {e}"))?;
+    let shortcuts = app.global_shortcut();
+    shortcuts.unregister_all().map_err(|e| e.to_string())?;
+    if let Some(next) = next {
+        shortcuts
+            .register(next)
+            .map_err(|_| "That shortcut is already used by another app".to_string())?;
+    }
+    Ok(())
+}
+
+fn show_main(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
+/// Hide the overlay. Nobody can see the subtitles then, so stop listening too.
+fn hide_main(app: &AppHandle) {
+    stop_listening(app);
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.hide();
+    }
+}
+
+fn toggle_main(app: &AppHandle) {
+    let visible = app
+        .get_webview_window("main")
+        .and_then(|w| w.is_visible().ok())
+        .unwrap_or(false);
+    if visible {
+        hide_main(app);
+    } else {
+        show_main(app);
+    }
+}
+
+/// Menu bar item: click shows the overlay, secondary click opens the menu.
+fn build_tray(app: &tauri::App) -> tauri::Result<()> {
+    let show = MenuItem::with_id(app, "show", "Show Käännä", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit Käännä", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show, &PredefinedMenuItem::separator(app)?, &quit])?;
+    TrayIconBuilder::with_id("main")
+        .icon(Image::from_bytes(include_bytes!("../icons/tray.png"))?)
+        .icon_as_template(true)
+        .tooltip("Käännä")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            "show" => show_main(app),
+            "quit" => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
+                show_main(tray.app_handle());
+            }
+        })
+        .build(app)?;
+    Ok(())
 }
 
 /// Release capture and models before the process exits (see `Engine::shutdown`).
@@ -142,6 +241,15 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, _shortcut, event| {
+                    if event.state == ShortcutState::Pressed {
+                        toggle_main(app);
+                    }
+                })
+                .build(),
+        )
         .setup(|app| {
             let models_dir = app.path().app_data_dir()?.join("models");
             std::fs::create_dir_all(&models_dir)?;
@@ -150,10 +258,20 @@ pub fn run() {
                 models_dir,
                 engine: Arc::new(Engine::default()),
                 session: Mutex::new(None),
+                attempt: AtomicU64::new(0),
                 settings: Arc::new(RwLock::new(Settings::default())),
                 downloads: Mutex::new(HashSet::new()),
             });
+            build_tray(app)?;
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            // Closing hides the panel like other macOS utility windows; ⌘Q or the menu bar
+            // item quits, and the Dock or menu bar icon brings it back.
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                hide_main(window.app_handle());
+            }
         })
         .invoke_handler(tauri::generate_handler![
             list_sources,
@@ -164,13 +282,15 @@ pub fn run() {
             stop,
             get_settings,
             set_settings,
+            set_toggle_shortcut,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app, event| {
-            if let RunEvent::Exit = event {
-                shutdown(app);
-            }
+        .run(|app, event| match event {
+            RunEvent::Exit => shutdown(app),
+            #[cfg(target_os = "macos")]
+            RunEvent::Reopen { .. } => show_main(app),
+            _ => {}
         });
 }
 
@@ -257,7 +377,7 @@ mod e2e {
         });
 
         let engine = Engine::default();
-        let (asr, mt) = engine.prepare(&root, models::DEFAULT_ASR).unwrap();
+        let (asr, mt) = engine.prepare(&root, models::DEFAULT_ASR, &|| true).unwrap().unwrap();
         let settings = Arc::new(RwLock::new(Settings::default()));
         let (audio, _stop) =
             pipeline::spawn_workers(app.handle().clone(), &root, asr, mt, settings).unwrap();
@@ -298,7 +418,7 @@ mod e2e {
     #[ignore]
     fn shutdown_releases_models_mid_inference() {
         let engine = Engine::default();
-        let (asr, mt) = engine.prepare(&models_dir(), models::DEFAULT_ASR).unwrap();
+        let (asr, mt) = engine.prepare(&models_dir(), models::DEFAULT_ASR, &|| true).unwrap().unwrap();
         drop(mt);
         let worker = std::thread::spawn(move || {
             let noise: Vec<f32> = (0..16_000 * 28).map(|i| ((i * 7919) % 200) as f32 / 1000.0 - 0.1).collect();

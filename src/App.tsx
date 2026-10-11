@@ -1,13 +1,16 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Toggle } from "@base-ui/react/toggle";
 import { Tooltip } from "@base-ui/react/tooltip";
-import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { CloseIcon, PinIcon, PlayIcon, SlidersIcon, StopIcon } from "./components/Icons";
 import { LevelMeter } from "./components/LevelMeter";
 import { Setup, type Downloads } from "./components/Models";
 import { SettingsPanel, type ViewPrefs } from "./components/SettingsPanel";
+import { DEFAULT_TOGGLE_SHORTCUT } from "./components/ShortcutRecorder";
 import { SourceSelect } from "./components/SourceSelect";
+import { Spinner } from "./components/Spinner";
 import { Transcript } from "./components/Transcript";
+import { usePresence } from "./lib/presence";
 import { api, on, prefs, type Model, type Settings, type Source, type Status, type Utterance } from "./lib/api";
 import "./App.css";
 
@@ -15,17 +18,27 @@ const MAX_LINES = 60;
 const MT_MODEL = "mt-opus-fi-en";
 const VAD_MODEL = "vad-silero";
 
-function Tip({ label, children }: { label: string; children: ReactElement }) {
+const UNDO_MS = 5000;
+
+function Tip({ label, shortcut, children }: { label: string; shortcut?: string; children: ReactElement }) {
   return (
     <Tooltip.Root>
       <Tooltip.Trigger render={children} />
       <Tooltip.Portal>
         <Tooltip.Positioner sideOffset={8}>
-          <Tooltip.Popup className="tooltip">{label}</Tooltip.Popup>
+          <Tooltip.Popup className="tooltip">
+            {label}
+            {shortcut && <kbd className="tooltip-kbd">{shortcut}</kbd>}
+          </Tooltip.Popup>
         </Tooltip.Positioner>
       </Tooltip.Portal>
     </Tooltip.Root>
   );
+}
+
+/** Keys typed into controls belong to them, not to the app shortcuts. */
+function isControl(t: EventTarget | null) {
+  return t instanceof Element && !!t.closest("button, input, textarea, select, [role], [contenteditable]");
 }
 
 export default function App() {
@@ -42,6 +55,9 @@ export default function App() {
   const [panel, setPanel] = useState<"transcript" | "settings">("transcript");
   const [pinned, setPinned] = useState(true);
   const [hovered, setHovered] = useState(true);
+  const [toggleShortcut, setToggleShortcut] = useState(() => prefs.get("toggleShortcut", DEFAULT_TOGGLE_SHORTCUT));
+  const [cleared, setCleared] = useState<Utterance[] | null>(null);
+  const undoTimer = useRef<number | undefined>(undefined);
 
   const refreshSources = useCallback(async () => {
     const list = await api.listSources();
@@ -60,6 +76,8 @@ export default function App() {
       setSettings(s);
       api.setSettings(s);
     });
+
+    api.setToggleShortcut(prefs.get("toggleShortcut", DEFAULT_TOGGLE_SHORTCUT)).catch((e) => setError(`Show/hide shortcut: ${e}`));
 
     const subs = [
       on("status", setStatus),
@@ -141,10 +159,63 @@ export default function App() {
     api.setSettings(s);
   };
 
+  const changeToggleShortcut = (s: string) => {
+    setToggleShortcut(s);
+    prefs.set("toggleShortcut", s);
+  };
+
   const changeView = (v: ViewPrefs) => {
     setView(v);
     prefs.set("view", v);
   };
+
+  // Clearing is instant; the old lines stay recoverable for a few seconds instead of asking first.
+  const clear = useCallback(() => {
+    if (lines.length === 0) return;
+    setCleared(lines);
+    setLines([]);
+    window.clearTimeout(undoTimer.current);
+    undoTimer.current = window.setTimeout(() => setCleared(null), UNDO_MS);
+  }, [lines]);
+
+  const undoClear = useCallback(() => {
+    if (!cleared) return;
+    // Lines that arrived after clearing stay, after the restored ones.
+    setLines((prev) => [...cleared, ...prev].slice(-MAX_LINES));
+    setCleared(null);
+    window.clearTimeout(undoTimer.current);
+  }, [cleared]);
+
+  const canStart = ready && !loading && !!sourceId;
+  // While models load the button already reads Stop, and pressing it abandons the load.
+  const busy = listening || loading;
+  const toggleListening = useCallback(() => {
+    if (busy) api.stop();
+    else if (canStart) start();
+  }, [busy, canStart, start]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const cmd = e.metaKey || e.ctrlKey;
+      if (cmd && e.key === ",") {
+        e.preventDefault();
+        setPanel((p) => (p === "settings" ? "transcript" : "settings"));
+      } else if (cmd && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        clear();
+      } else if (cmd && !e.shiftKey && e.key.toLowerCase() === "z" && cleared) {
+        e.preventDefault();
+        undoClear();
+      } else if (e.key === "Escape" && !e.defaultPrevented && !document.querySelector('[role="listbox"]')) {
+        setPanel("transcript");
+      } else if (e.key === " " && !cmd && !e.repeat && !isControl(e.target)) {
+        e.preventDefault();
+        toggleListening();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [clear, undoClear, cleared, toggleListening]);
 
   const togglePin = async (v: boolean) => {
     setPinned(v);
@@ -153,38 +224,89 @@ export default function App() {
 
   // While translating, fade the chrome away so the window reads like subtitles.
   const quiet = listening && !hovered && panel === "transcript" && lines.length > 0;
+  const screen = panel === "settings" && settings && asrModel ? "settings" : !ready && models.length > 0 ? "setup" : "transcript";
+  const startLabel = busy ? "Stop" : "Start";
+  // The label box animates to the active word's width, so the button resizes smoothly instead of jumping.
+  const labelsRef = useRef<HTMLSpanElement>(null);
+  const [labelWidth, setLabelWidth] = useState<number>();
+  useLayoutEffect(() => {
+    const active = labelsRef.current?.querySelector<HTMLElement>('[data-visible="true"]');
+    if (!active) return;
+    // Measure the text itself: WebKit reports the grid item's box wider than its content.
+    const range = document.createRange();
+    range.selectNodeContents(active);
+    setLabelWidth(Math.ceil(range.getBoundingClientRect().width));
+  }, [startLabel]);
+  // Exit durations match the CSS below so leaving elements finish fading before they unmount.
+  const [note, noteExiting] = usePresence(loading ? (status.message ?? null) : null, 120);
+  const [clearedToast, clearedExiting] = usePresence(cleared, 150);
+  const [errorToast, errorExiting] = usePresence(error && ready ? error : null, 150);
+  const startBlocked = !ready ? "Download the models first" : !sourceId ? "Choose an audio source first" : null;
 
   return (
     <Tooltip.Provider delay={500}>
       <div
         className="app"
         data-quiet={quiet}
+        data-view={screen}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
       >
         <header className="toolbar" data-tauri-drag-region>
           <div className="toolbar-left" data-tauri-drag-region>
-            <span className="status-dot" data-state={status.state} />
-            <SourceSelect sources={sources} value={sourceId} onChange={changeSource} onOpen={refreshSources} />
+            {/* Top-left, like every macOS window. Hides the panel; ⌘Q quits. */}
+            <button className="close-btn" onClick={() => getCurrentWindow().close()} aria-label="Close window">
+              <CloseIcon width={12} height={12} strokeWidth={2.6} />
+            </button>
+            <SourceSelect sources={sources} value={sourceId} onChange={changeSource} onOpen={refreshSources} state={status.state} />
             <LevelMeter active={listening} />
           </div>
           <div className="toolbar-right" data-tauri-drag-region>
-            {loading && <span className="toolbar-note">{status.message}</span>}
-            <button
-              className="btn btn-start"
-              data-listening={listening}
-              disabled={!ready || loading || !sourceId}
-              onClick={() => (listening ? api.stop() : start())}
+            {note && (
+              <span className="toolbar-note" data-exiting={noteExiting || undefined}>
+                {note}
+              </span>
+            )}
+            <Tip
+              label={loading ? "Cancel loading" : listening ? "Stop translating" : (startBlocked ?? "Start translating")}
+              shortcut={!busy && startBlocked ? undefined : "Space"}
             >
-              {listening ? <StopIcon width={12} height={12} /> : <PlayIcon width={12} height={12} />}
-              {listening ? "Stop" : loading ? "Starting" : "Start"}
-            </button>
+              {/* Disabled buttons swallow pointer events, so the wrapper carries the tooltip. */}
+              <span className="tip-wrap">
+                <button
+                  className="btn btn-start"
+                  data-listening={busy}
+                  disabled={!busy && !canStart}
+                  onClick={toggleListening}
+                >
+                  <span className="swap-stack">
+                    <span className="swap" data-visible={!busy}>
+                      <PlayIcon width={16} height={16} />
+                    </span>
+                    <span className="swap" data-visible={listening}>
+                      <StopIcon width={16} height={16} />
+                    </span>
+                    <span className="swap" data-visible={loading}>
+                      <Spinner size={14} />
+                    </span>
+                  </span>
+                  {/* All labels share one grid cell so they can cross-fade in place. */}
+                  <span className="swap-stack start-labels" ref={labelsRef} style={{ width: labelWidth }}>
+                    {(["Start", "Stop"] as const).map((l) => (
+                      <span key={l} className="swap swap-label" data-visible={l === startLabel} aria-hidden={l !== startLabel}>
+                        {l}
+                      </span>
+                    ))}
+                  </span>
+                </button>
+              </span>
+            </Tip>
             <Tip label="Keep on top">
               <Toggle className="icon-btn" pressed={pinned} onPressedChange={togglePin} aria-label="Keep on top">
                 <PinIcon />
               </Toggle>
             </Tip>
-            <Tip label="Settings">
+            <Tip label="Settings" shortcut="⌘,">
               <Toggle
                 className="icon-btn"
                 pressed={panel === "settings"}
@@ -194,16 +316,11 @@ export default function App() {
                 <SlidersIcon />
               </Toggle>
             </Tip>
-            <Tip label="Quit">
-              <button className="icon-btn" onClick={() => getCurrentWindow().close()} aria-label="Quit">
-                <CloseIcon />
-              </button>
-            </Tip>
           </div>
         </header>
 
         <main className="content">
-          {panel === "settings" && settings && asrModel ? (
+          {screen === "settings" && settings && asrModel ? (
             <SettingsPanel
               settings={settings}
               onSettings={changeSettings}
@@ -214,23 +331,37 @@ export default function App() {
               onAsrModel={changeAsrModel}
               downloads={downloads}
               onDownload={download}
-              onClear={() => setLines([])}
+              onClear={clear}
+              toggleShortcut={toggleShortcut}
+              onToggleShortcut={changeToggleShortcut}
             />
-          ) : !ready && models.length > 0 ? (
+          ) : screen === "setup" ? (
             <Setup required={required} downloads={downloads} error={error} onDownloadAll={downloadAll} />
           ) : (
             <Transcript lines={lines} showOriginal={view.showOriginal} fontSize={view.fontSize} listening={listening} />
           )}
         </main>
 
-        {error && ready && (
-          <div className="toast" role="alert">
-            <span>{error}</span>
-            <button className="icon-btn" onClick={() => setError(null)} aria-label="Dismiss">
-              <CloseIcon width={14} height={14} />
-            </button>
-          </div>
-        )}
+        <div className="toasts">
+          {clearedToast && (
+            <div className="toast" role="status" data-exiting={clearedExiting || undefined}>
+              <span>Transcript cleared</span>
+              <Tip label="Undo" shortcut="⌘Z">
+                <button className="btn btn-ghost btn-sm" onClick={undoClear}>
+                  Undo
+                </button>
+              </Tip>
+            </div>
+          )}
+          {errorToast && (
+            <div className="toast toast-error" role="alert" data-exiting={errorExiting || undefined}>
+              <span>{errorToast}</span>
+              <button className="icon-btn" onClick={() => setError(null)} aria-label="Dismiss">
+                <CloseIcon width={14} height={14} />
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </Tooltip.Provider>
   );

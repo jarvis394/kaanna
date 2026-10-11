@@ -91,7 +91,9 @@ pub struct Engine {
 
 impl Engine {
     /// Load (or reuse) the requested ASR model and the translator. Blocking; can take seconds.
-    pub fn prepare(&self, root: &Path, asr_id: &str) -> Result<Models> {
+    /// Loads can't be interrupted midway, but once `still_wanted` turns false the remaining
+    /// models are skipped and `None` is returned. Whatever already loaded stays cached.
+    pub fn prepare(&self, root: &Path, asr_id: &str, still_wanted: &dyn Fn() -> bool) -> Result<Option<Models>> {
         let asr = {
             let mut slot = self.asr.lock();
             match slot.as_ref() {
@@ -109,6 +111,9 @@ impl Engine {
                 }
             }
         };
+        if !still_wanted() {
+            return Ok(None);
+        }
         let mt = {
             let mut slot = self.mt.lock();
             match slot.as_ref() {
@@ -122,7 +127,7 @@ impl Engine {
                 }
             }
         };
-        Ok((asr, mt))
+        Ok(Some((asr, mt)))
     }
 
     /// Stop all inference and free the models. Must run before the process exits: ggml's Metal

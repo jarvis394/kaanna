@@ -35,7 +35,7 @@ export const ChevronIcon = (p: P) => (
 
 export const CheckIcon = (p: P) => (
   <svg {...base} {...p}>
-    <path d="m5 12.5 4.5 4.5L19 7.5" />
+    <path d="m5 12.5 4.5 4.5L19 7.5" pathLength={1} />
   </svg>
 );
 
@@ -74,5 +74,11 @@ export const StopIcon = (p: P) => (
 export const DownloadIcon = (p: P) => (
   <svg {...base} {...p}>
     <path d="M12 4v11M7 10l5 5 5-5M5 20h14" />
+  </svg>
+);
+
+export const ArrowDownIcon = (p: P) => (
+  <svg {...base} {...p}>
+    <path d="M12 5v14M6 13l6 6 6-6" />
   </svg>
 );

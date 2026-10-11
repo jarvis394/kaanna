@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { formatBytes, type Model, type Settings } from "../lib/api";
 import { CheckIcon, ChevronIcon } from "./Icons";
 import { ModelRow, type Downloads } from "./Models";
+import { ShortcutRecorder } from "./ShortcutRecorder";
 
 export interface ViewPrefs {
   showOriginal: boolean;
@@ -22,6 +23,8 @@ interface Props {
   downloads: Downloads;
   onDownload: (id: string) => void;
   onClear: () => void;
+  toggleShortcut: string;
+  onToggleShortcut: (accelerator: string) => void;
 }
 
 function Row({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
@@ -76,49 +79,62 @@ export function SettingsPanel(p: Props) {
     <div className="settings">
       <section>
         <h2>Display</h2>
-        <Row label="Show Finnish original">
-          <Toggle label="Show Finnish original" checked={p.view.showOriginal} onChange={(showOriginal) => p.onView({ ...p.view, showOriginal })} />
-        </Row>
-        <Row label="Text size">
-          <RangeSlider
-            label="Text size"
-            value={p.view.fontSize}
-            min={14}
-            max={34}
-            step={1}
-            format={(v) => `${v}px`}
-            onChange={(fontSize) => p.onView({ ...p.view, fontSize })}
-          />
-        </Row>
+        <div className="group">
+          <Row label="Show Finnish original">
+            <Toggle label="Show Finnish original" checked={p.view.showOriginal} onChange={(showOriginal) => p.onView({ ...p.view, showOriginal })} />
+          </Row>
+          <Row label="Text size">
+            <RangeSlider
+              label="Text size"
+              value={p.view.fontSize}
+              min={14}
+              max={34}
+              step={1}
+              format={(v) => `${v}px`}
+              onChange={(fontSize) => p.onView({ ...p.view, fontSize })}
+            />
+          </Row>
+        </div>
       </section>
 
       <section>
         <h2>Listening</h2>
-        <Row label="Live preview" hint="Show a draft while a sentence is still being spoken">
-          <Toggle label="Live preview" checked={p.settings.livePreview} onChange={(livePreview) => p.onSettings({ ...p.settings, livePreview })} />
-        </Row>
-        <Row label="Sentence pause" hint="Silence that ends a sentence">
-          <RangeSlider
-            label="Sentence pause"
-            value={p.settings.pauseMs}
-            min={250}
-            max={1500}
-            step={50}
-            format={(v) => `${(v / 1000).toFixed(2)}s`}
-            onChange={(pauseMs) => p.onSettings({ ...p.settings, pauseMs })}
-          />
-        </Row>
-        <Row label="Voice sensitivity" hint="Lower picks up quieter speech">
-          <RangeSlider
-            label="Voice sensitivity"
-            value={Math.round((1 - p.settings.vadThreshold) * 100)}
-            min={20}
-            max={80}
-            step={5}
-            format={(v) => `${v}%`}
-            onChange={(v) => p.onSettings({ ...p.settings, vadThreshold: 1 - v / 100 })}
-          />
-        </Row>
+        <div className="group">
+          <Row label="Live preview" hint="Show a draft while a sentence is still being spoken">
+            <Toggle label="Live preview" checked={p.settings.livePreview} onChange={(livePreview) => p.onSettings({ ...p.settings, livePreview })} />
+          </Row>
+          <Row label="Sentence pause" hint="Silence that ends a sentence">
+            <RangeSlider
+              label="Sentence pause"
+              value={p.settings.pauseMs}
+              min={250}
+              max={1500}
+              step={50}
+              format={(v) => `${(v / 1000).toFixed(2)}s`}
+              onChange={(pauseMs) => p.onSettings({ ...p.settings, pauseMs })}
+            />
+          </Row>
+          <Row label="Voice sensitivity" hint="Lower picks up quieter speech">
+            <RangeSlider
+              label="Voice sensitivity"
+              value={Math.round((1 - p.settings.vadThreshold) * 100)}
+              min={20}
+              max={80}
+              step={5}
+              format={(v) => `${v}%`}
+              onChange={(v) => p.onSettings({ ...p.settings, vadThreshold: 1 - v / 100 })}
+            />
+          </Row>
+        </div>
+      </section>
+
+      <section>
+        <h2>Shortcut</h2>
+        <div className="group">
+          <Row label="Show or hide Käännä" hint="Works from any app">
+            <ShortcutRecorder value={p.toggleShortcut} onChange={p.onToggleShortcut} />
+          </Row>
+        </div>
       </section>
 
       <section>
@@ -135,7 +151,7 @@ export function SettingsPanel(p: Props) {
               <Select.Popup className="select-popup">
                 <Select.List>
                   {asrModels.map((m) => (
-                    <Select.Item key={m.id} value={m.id} className="select-item">
+                    <Select.Item key={m.id} value={m.id} className="select-item select-item-plain">
                       <Select.ItemText className="select-item-text">{m.name}</Select.ItemText>
                       <span className="select-item-hint">{m.installed ? "Downloaded" : formatBytes(m.size)}</span>
                       <Select.ItemIndicator className="select-item-check">

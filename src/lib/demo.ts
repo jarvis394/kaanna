@@ -58,6 +58,8 @@ export function installDemoBackend() {
           return "asr-fi-large-v3-q5";
         case "get_settings":
           return settings;
+        case "set_toggle_shortcut":
+          return;
         case "set_settings":
           settings = (args as { settings: Settings }).settings;
           return;

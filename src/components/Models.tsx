@@ -1,4 +1,5 @@
 import { Progress } from "@base-ui/react/progress";
+import { useState } from "react";
 import { formatBytes, type DownloadProgress, type Model } from "../lib/api";
 import { CheckIcon, DownloadIcon } from "./Icons";
 
@@ -8,6 +9,9 @@ const KIND_LABEL = { asr: "Speech recognition", mt: "Translation", vad: "Voice d
 
 export function ModelRow({ model, progress, onDownload }: { model: Model; progress?: DownloadProgress; onDownload?: () => void }) {
   const pct = progress && progress.total > 0 ? (progress.received / progress.total) * 100 : null;
+  // Celebrate only a download that finishes while this row is on screen, not models that were already there.
+  const [installedAtMount] = useState(model.installed);
+  const justFinished = model.installed && !installedAtMount;
   return (
     <div className="model-row" data-installed={model.installed}>
       <div className="model-row-text">
@@ -28,7 +32,7 @@ export function ModelRow({ model, progress, onDownload }: { model: Model; progre
       </div>
       <div className="model-row-action">
         {model.installed ? (
-          <span className="badge">
+          <span className="badge" data-celebrate={justFinished || undefined}>
             <CheckIcon width={12} height={12} /> Ready
           </span>
         ) : pct !== null ? (

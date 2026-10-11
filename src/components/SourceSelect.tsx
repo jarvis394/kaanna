@@ -1,5 +1,5 @@
 import { Select } from "@base-ui/react/select";
-import type { Source } from "../lib/api";
+import type { Source, Status } from "../lib/api";
 import { CheckIcon, ChevronIcon, MicIcon, SpeakerIcon } from "./Icons";
 
 interface Props {
@@ -7,13 +7,15 @@ interface Props {
   value: string | null;
   onChange: (id: string) => void;
   onOpen: () => void;
+  /** The trigger icon doubles as the status light: green while listening. */
+  state: Status["state"];
 }
 
 function SourceIcon({ kind }: { kind: Source["kind"] }) {
   return kind === "system" ? <SpeakerIcon /> : <MicIcon />;
 }
 
-export function SourceSelect({ sources, value, onChange, onOpen }: Props) {
+export function SourceSelect({ sources, value, onChange, onOpen, state }: Props) {
   const items = sources.map((s) => ({ value: s.id, label: s.name }));
   const current = sources.find((s) => s.id === value);
   return (
@@ -24,7 +26,9 @@ export function SourceSelect({ sources, value, onChange, onOpen }: Props) {
       onOpenChange={(open) => open && onOpen()}
     >
       <Select.Trigger className="source-trigger" aria-label="Audio source">
-        <span className="source-trigger-icon">{current && <SourceIcon kind={current.kind} />}</span>
+        <span className="source-trigger-icon" data-state={state}>
+          {current && <SourceIcon kind={current.kind} />}
+        </span>
         <Select.Value className="source-trigger-value" placeholder="Choose audio source" />
         <Select.Icon className="source-trigger-chevron">
           <ChevronIcon width={14} height={14} />
