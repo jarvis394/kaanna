@@ -79,7 +79,7 @@ the live VAD pipeline.
 
 ### Release builds
 
-`.github/workflows/build.yml` builds installers for macOS (Apple Silicon and Intel), Windows
+`.github/workflows/build.yml` builds installers for macOS (Apple Silicon), Windows
 (x64: `.msi` and `.exe` installers, plus a `_portable.zip` that runs without installing) and
 Linux (x64: `.deb`, `.rpm`, `.AppImage`). Bundles and install folders are named `Kaanna`, in
 plain ASCII; the app still calls itself Käännä. The Windows installers always install into a
