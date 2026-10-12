@@ -145,7 +145,7 @@ export function SettingsPanel(p: Props) {
   const device = p.device === "cpu" || p.gpus.some((g) => `gpu:${g.index}` === p.device) ? p.device : "auto";
   const stored = p.models.filter((m) => m.installed);
   const used = stored.reduce((n, m) => n + m.size, 0);
-  // Required models are managed in the Models section; Storage lists the rest.
+  // Downloaded models that aren't in use, listed in Storage after the required ones.
   const extra = stored.filter((m) => !p.required.some((r) => r.id === m.id));
 
   return (
@@ -204,7 +204,7 @@ export function SettingsPanel(p: Props) {
       <section>
         <h2>Shortcut</h2>
         <div className="group">
-          <Row label="Show or hide Käännä" hint="Works from any app">
+          <Row label="Show or hide Käännä">
             <ShortcutRecorder value={p.toggleShortcut} onChange={p.onToggleShortcut} />
           </Row>
         </div>
@@ -222,6 +222,13 @@ export function SettingsPanel(p: Props) {
             </Row>
           )}
         </div>
+      </section>
+
+      <section>
+        <h2>
+          Storage<span className="h2-note">{stored.length ? `${formatBytes(used)} on ${thisDevice}` : "No models downloaded"}</span>
+        </h2>
+        {/* The models in use first, with download controls; then any others still on disk. */}
         <div className="model-list">
           {p.required.map((m) => (
             <ModelRow
@@ -233,20 +240,10 @@ export function SettingsPanel(p: Props) {
               onDelete={() => p.onDeleteModel(m.id)}
             />
           ))}
+          {extra.map((m) => (
+            <StoredModelRow key={m.id} model={m} onDelete={() => p.onDeleteModel(m.id)} />
+          ))}
         </div>
-      </section>
-
-      <section>
-        <h2>
-          Storage<span className="h2-note">{stored.length ? `${formatBytes(used)} on ${thisDevice}` : "No models downloaded"}</span>
-        </h2>
-        {extra.length > 0 && (
-          <div className="model-list">
-            {extra.map((m) => (
-              <StoredModelRow key={m.id} model={m} onDelete={() => p.onDeleteModel(m.id)} />
-            ))}
-          </div>
-        )}
       </section>
 
       <section className="settings-footer">
