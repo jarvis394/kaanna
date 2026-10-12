@@ -102,9 +102,17 @@ Windows release builds enable the `vulkan` Cargo feature, which needs the
 [Vulkan SDK](https://vulkan.lunarg.com/sdk/home#windows) to build. Without it,
 `bun run tauri build` produces a CPU-only build; add `--features vulkan` for GPU support.
 
-The builds aren't code-signed. On macOS, open the app once with right-click → *Open* (or
-*System Settings → Privacy & Security → Open Anyway*). On Windows, click past SmartScreen
-with *More info → Run anyway*.
+The builds aren't signed with a developer certificate. On macOS they're signed ad hoc
+(`signingIdentity: "-"` in `tauri.conf.json`): Apple Silicon refuses to run a bundle that isn't
+signed at all, reporting it as "damaged". The hardened runtime is off, since it's only needed
+for notarization and would block the microphone without extra entitlements.
+
+To open it the first time on macOS, try to open the app, then click *Open Anyway* under
+*System Settings → Privacy & Security*. If macOS still says the app is damaged, clear the
+download quarantine with `xattr -dr com.apple.quarantine /Applications/Kaanna.app`. Ad-hoc
+signatures change with every build, so macOS asks for the microphone and screen-recording
+permissions again after each update. On Windows, click past SmartScreen with
+*More info → Run anyway*.
 
 ### Notes
 
