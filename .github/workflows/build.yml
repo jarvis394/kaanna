@@ -2,9 +2,15 @@ name: Build
 
 # Tags like v0.2.0 build every platform and attach the installers to a draft GitHub release.
 # Run it by hand (Actions → Build → Run workflow) to get the installers as workflow artifacts only.
+# Pushes to main that change dependencies or this workflow rebuild too, to refresh the Rust cache.
 on:
   push:
     tags: ["v*"]
+    branches: [main]
+    paths:
+      - src-tauri/Cargo.lock
+      - src-tauri/Cargo.toml
+      - .github/workflows/build.yml
   workflow_dispatch:
 
 concurrency:
@@ -112,6 +118,11 @@ jobs:
           workspaces: src-tauri -> ${{ runner.os == 'Windows' && '../../../../t' || 'target' }}
           # whisper.cpp's build script doesn't watch the GGML_* variables; bump to rebuild it.
           key: ${{ matrix.target }}-ggml2
+          # GitHub scopes caches to a ref: a tag or branch build can restore only its own caches
+          # and main's. So only main saves (~700 MB per platform); every other build restores
+          # main's latest, falling back to an older one when Cargo.lock has moved on, instead of
+          # compiling every dependency from scratch.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - run: bun install --frozen-lockfile
 
