@@ -202,7 +202,7 @@ export function SettingsPanel(p: Props) {
       </section>
 
       <section>
-        <h2>Shortcut</h2>
+        <h2>Shortcuts</h2>
         <div className="group">
           <Row label="Show or hide Käännä">
             <ShortcutRecorder value={p.toggleShortcut} onChange={p.onToggleShortcut} />
