@@ -131,18 +131,17 @@ html[data-platform="windows"] {
   --radius: 8px;
 }
 
-/* Windows uses plain blur-behind, untinted, because the system acrylic turns opaque whenever the
-   window loses focus, and this overlay is unfocused most of the time. The tint does the
-   darkening instead: lighter while unfocused, a touch denser while focused so controls read
-   well. Skipped when an accessibility setting asks for a more opaque tint (see below). */
+/* The acrylic is already tinted, so darken it less than macOS's vibrancy: lightest while
+   unfocused (most of the time, see `keep_backdrop_active`), a touch denser while focused so
+   controls read well. Skipped when an accessibility setting asks for a more opaque tint. */
 @media (prefers-reduced-transparency: no-preference) and (prefers-contrast: no-preference) {
   .app[data-platform="windows"] {
-    --tint: rgba(0, 0, 0, 0.42);
+    --tint: rgba(0, 0, 0, 0.26);
     transition: background-color 250ms ease;
   }
 
   .app[data-platform="windows"][data-focused="true"] {
-    --tint: rgba(0, 0, 0, 0.5);
+    --tint: rgba(0, 0, 0, 0.32);
   }
 }
 

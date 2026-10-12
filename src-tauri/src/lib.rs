@@ -297,6 +297,34 @@ fn borderless_frame(app: &AppHandle) {
     }
 }
 
+/// Windows 11 draws the acrylic backdrop only while the window looks active, and swaps in an
+/// opaque fill otherwise. This overlay sits unfocused over other apps most of the time, so tell
+/// the frame it's always active. Only the frame's look changes: keyboard focus, and the focus
+/// events the UI uses for its tint, still follow the real focus.
+#[cfg(windows)]
+fn keep_backdrop_active(app: &AppHandle) {
+    use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+    use windows_sys::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
+    use windows_sys::Win32::UI::WindowsAndMessaging::WM_NCACTIVATE;
+
+    unsafe extern "system" fn subclass(
+        hwnd: HWND,
+        msg: u32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+        _id: usize,
+        _data: usize,
+    ) -> LRESULT {
+        // SAFETY: forwarding a message we were handed to the next window procedure.
+        unsafe { DefSubclassProc(hwnd, msg, if msg == WM_NCACTIVATE { 1 } else { wparam }, lparam) }
+    }
+
+    let Some(window) = app.get_webview_window("main") else { return };
+    let Ok(hwnd) = window.hwnd() else { return };
+    // SAFETY: called from `setup`, on the thread that owns the window, as subclassing requires.
+    unsafe { SetWindowSubclass(hwnd.0 as _, Some(subclass), 1, 0) };
+}
+
 /// Fade the native close button with the toolbar while the window is in subtitle mode.
 #[tauri::command]
 fn set_window_controls_visible(app: AppHandle, visible: bool) {
@@ -435,7 +463,10 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             close_button_only(app.handle());
             #[cfg(windows)]
-            borderless_frame(app.handle());
+            {
+                borderless_frame(app.handle());
+                keep_backdrop_active(app.handle());
+            }
             Ok(())
         })
         .on_window_event(|window, event| {

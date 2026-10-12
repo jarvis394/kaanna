@@ -61,8 +61,9 @@ objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSAnimation", "NSAnimationContext", "NSButton", "NSControl", "NSResponder", "NSView", "NSWindow"] }
 
 [target.'cfg(windows)'.dependencies]
-# Strips the hairline DWM draws around frameless windows (see `borderless_frame`).
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dwm"] }
+# Window frame tweaks: no DWM hairline, acrylic kept while unfocused (see `borderless_frame`,
+# `keep_backdrop_active`).
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-global-shortcut = "2"
