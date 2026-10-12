@@ -93,17 +93,17 @@ function deviceHint(gpus: Gpu[], device: Device) {
   return explicit ? "Runs speech recognition" : `Using ${autoGpu(gpus).name}`;
 }
 
-function ProcessorSelect({ gpus, device, onDevice }: { gpus: Gpu[]; device: Device; onDevice: (d: Device) => void }) {
-  // A GPU that's gone (e.g. an unplugged eGPU) falls back to automatic, as in the backend.
-  const value = device === "cpu" || gpus.some((g) => `gpu:${g.index}` === device) ? device : "auto";
-  const options = [
-    { value: "auto", label: "Automatic", hint: "Prefers dedicated" },
-    ...gpus.map((g) => ({ value: `gpu:${g.index}`, label: g.name, hint: gpuHint(g) })),
-    { value: "cpu", label: "CPU only", hint: "Much slower" },
-  ];
+interface Option {
+  value: string;
+  label: string;
+  hint: string;
+}
+
+/** A compact menu button that fits in a settings row; each item shows a hint on the right. */
+function RowSelect({ label, options, value, onChange }: { label: string; options: Option[]; value: string; onChange: (v: string) => void }) {
   return (
-    <Select.Root items={options} value={value} onValueChange={(v) => v && onDevice(v)}>
-      <Select.Trigger className="field-trigger field-trigger-compact" aria-label="Graphics processor">
+    <Select.Root items={options} value={value} onValueChange={(v) => v && onChange(v)}>
+      <Select.Trigger className="field-trigger field-trigger-compact" aria-label={label}>
         <Select.Value className="source-trigger-value" />
         <Select.Icon className="source-trigger-chevron">
           <ChevronIcon width={14} height={14} />
@@ -130,9 +130,19 @@ function ProcessorSelect({ gpus, device, onDevice }: { gpus: Gpu[]; device: Devi
   );
 }
 
+function processorOptions(gpus: Gpu[]): Option[] {
+  return [
+    { value: "auto", label: "Automatic", hint: "Prefers dedicated" },
+    ...gpus.map((g) => ({ value: `gpu:${g.index}`, label: g.name, hint: gpuHint(g) })),
+    { value: "cpu", label: "CPU only", hint: "Much slower" },
+  ];
+}
+
 export function SettingsPanel(p: Props) {
   const asrModels = p.models.filter((m) => m.kind === "asr");
-  const items = asrModels.map((m) => ({ value: m.id, label: m.name }));
+  const modelOptions = asrModels.map((m) => ({ value: m.id, label: m.name, hint: m.installed ? "Downloaded" : formatBytes(m.size) }));
+  // A GPU that's gone (e.g. an unplugged eGPU) falls back to automatic, as in the backend.
+  const device = p.device === "cpu" || p.gpus.some((g) => `gpu:${g.index}` === p.device) ? p.device : "auto";
   const stored = p.models.filter((m) => m.installed);
   const used = stored.reduce((n, m) => n + m.size, 0);
   // Required models are managed in the Models section; Storage lists the rest.
@@ -202,31 +212,16 @@ export function SettingsPanel(p: Props) {
 
       <section>
         <h2>Models</h2>
-        <Select.Root items={items} value={p.asrModel} onValueChange={(v) => v && p.onAsrModel(v)}>
-          <Select.Trigger className="field-trigger">
-            <Select.Value />
-            <Select.Icon className="source-trigger-chevron">
-              <ChevronIcon width={14} height={14} />
-            </Select.Icon>
-          </Select.Trigger>
-          <Select.Portal>
-            <Select.Positioner className="select-positioner" sideOffset={6} alignItemWithTrigger={false}>
-              <Select.Popup className="select-popup">
-                <Select.List>
-                  {asrModels.map((m) => (
-                    <Select.Item key={m.id} value={m.id} className="select-item select-item-plain">
-                      <Select.ItemText className="select-item-text">{m.name}</Select.ItemText>
-                      <span className="select-item-hint">{m.installed ? "Downloaded" : formatBytes(m.size)}</span>
-                      <Select.ItemIndicator className="select-item-check">
-                        <CheckIcon width={14} height={14} />
-                      </Select.ItemIndicator>
-                    </Select.Item>
-                  ))}
-                </Select.List>
-              </Select.Popup>
-            </Select.Positioner>
-          </Select.Portal>
-        </Select.Root>
+        <div className="group">
+          <Row label="Selected model" hint="Transcribes the speech in the audio">
+            <RowSelect label="Selected model" options={modelOptions} value={p.asrModel} onChange={p.onAsrModel} />
+          </Row>
+          {p.gpus.length > 0 && (
+            <Row label="Graphics processor" hint={deviceHint(p.gpus, device)}>
+              <RowSelect label="Graphics processor" options={processorOptions(p.gpus)} value={device} onChange={p.onDevice} />
+            </Row>
+          )}
+        </div>
         <div className="model-list">
           {p.required.map((m) => (
             <ModelRow
@@ -239,13 +234,6 @@ export function SettingsPanel(p: Props) {
             />
           ))}
         </div>
-        {p.gpus.length > 0 && (
-          <div className="group">
-            <Row label="Graphics processor" hint={deviceHint(p.gpus, p.device)}>
-              <ProcessorSelect gpus={p.gpus} device={p.device} onDevice={p.onDevice} />
-            </Row>
-          </div>
-        )}
       </section>
 
       <section>
