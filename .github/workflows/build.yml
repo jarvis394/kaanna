@@ -15,7 +15,10 @@ on:
 
 concurrency:
   group: build-${{ github.ref }}
-  cancel-in-progress: true
+  # A newer push supersedes an older build, except on main: main's builds save the Rust cache
+  # every other build restores, and a cancelled job saves nothing (Windows, the slowest, was
+  # the one that kept losing its cache).
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   build:
